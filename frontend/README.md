@@ -1,73 +1,157 @@
-# React + TypeScript + Vite
+# DecisionOS Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Frontend UI for **DecisionOS** — an AI-powered system that helps users make optimal decisions by analyzing tasks, deadlines, and constraints.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Overview
 
-## React Compiler
+DecisionOS goes beyond task management.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+It:
 
-## Expanding the ESLint configuration
+- Understands user problems
+- Detects conflicts (deadlines, meetings, priorities)
+- Simulates multiple outcomes
+- Recommends the best possible decision
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+This project contains the **React + Vite frontend UI** for interacting with the system.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+---
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Tech Stack
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- React (Vite)
+- TypeScript
+- Tailwind CSS
+- shadcn/ui
+- Axios
+
+---
+
+## Installation & Setup
+
+### 1. Clone the repository
+
+```bash
+cd frontend
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+---
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### 2. Install dependencies
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
 ```
+
+---
+
+### 3. Run development server
+
+```bash
+npm run dev
+```
+
+App will run on:
+
+```
+http://localhost:5173
+```
+
+---
+
+### 4. Build for production
+
+```bash
+npm run build
+```
+
+---
+
+## Features Implemented
+
+### 1. User Input Form
+
+- Input for task/problem
+- Deadline selection
+- Constraints (meetings, time limits)
+
+---
+
+### 2. Simulation View
+
+- Displays multiple decision options (e.g., Option A / Option B)
+- Shows:
+  - Risk levels
+  - Expected outcomes
+  - Success probability
+
+---
+
+### 3. Decision Recommendation
+
+- Highlights the best decision
+- Displays reasoning behind the recommendation
+
+---
+
+### 4. Task & Conflict Visualization
+
+- Timeline / list-based view
+- Highlights conflicts between tasks and deadlines
+
+---
+
+### 5. AI Processing State
+
+- Loading indicators
+- Messages like:
+  - “Analyzing your situation…”
+  - “Simulating outcomes…”
+
+---
+
+### 6. UI Layout
+
+- Sidebar navigation
+- Header section
+- Dashboard-style layout
+- Built using modern shadcn/ui components
+
+---
+
+### 7. API Integration Structure
+
+- Axios setup ready
+- Service layer created for backend integration
+
+---
+
+## Project Structure
+
+```bash
+src/
+├── components/
+├── pages/
+├── services/
+├── hooks/
+├── utils/
+├── App.tsx
+└── main.tsx
+```
+
+---
+
+## UI Design
+
+- Modern SaaS-style interface
+- Clean and minimal layout
+- Rounded cards and soft shadows
+- Focused on clarity for decision-making
+
+---
+
+## Note
+
+> This is not just a task manager UI — it is a **decision intelligence interface**.
