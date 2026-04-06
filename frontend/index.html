@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DecisionOS - AI That Simulates Before It Decides</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🎯 DecisionOS</h1>
+            <p class="tagline">AI That Simulates Before It Decides</p>
+        </header>
+
+        <!-- Input Section -->
+        <section class="input-section">
+            <div class="input-wrapper">
+                <textarea 
+                    id="messageInput" 
+                    placeholder="Describe your situation... e.g., 'I have exam at 7pm and gym at 6pm. What should I do?'"
+                    rows="3"
+                ></textarea>
+                <button id="submitBtn" onclick="submitDecision()">
+                    <span class="btn-text">Get Decision</span>
+                    <span class="btn-loading" style="display: none;">Processing...</span>
+                </button>
+            </div>
+            <div class="user-id-wrapper">
+                <label for="userId">User ID:</label>
+                <input type="text" id="userId" value="user_001" />
+            </div>
+        </section>
+
+        <!-- Main Content Grid -->
+        <div class="main-grid">
+            <!-- Agent Trace Panel -->
+            <section class="trace-panel">
+                <h2>🔄 Agent Pipeline</h2>
+                <div id="traceContainer" class="trace-container">
+                    <div class="trace-placeholder">
+                        Submit a request to see the agent pipeline...
+                    </div>
+                </div>
+            </section>
+
+            <!-- Decision Display Panel -->
+            <section class="decision-panel">
+                <h2>✅ Decision</h2>
+                <div id="decisionContainer" class="decision-container">
+                    <div class="decision-placeholder">
+                        Your decision will appear here...
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Scenarios Section -->
+        <section class="scenarios-section" id="scenariosSection" style="display: none;">
+            <h2>🎲 Simulated Scenarios</h2>
+            <div id="scenariosContainer" class="scenarios-container"></div>
+        </section>
+
+        <!-- Action Buttons Section -->
+        <section class="actions-section" id="actionsSection" style="display: none;">
+            <h2>⚡ Quick Actions</h2>
+            <div id="actionsContainer" class="actions-container"></div>
+        </section>
+
+        <!-- Confirmation Modal -->
+        <div id="confirmModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <h3>Confirm Action</h3>
+                <p id="confirmMessage">Are you sure you want to execute this action?</p>
+                <div class="modal-buttons">
+                    <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+                    <button class="btn-confirm" onclick="confirmAction()">Execute</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>
