@@ -20,18 +20,6 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
                     Decisions
                 </a>
-                <!-- <a href="#" class="nav-item">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
-                    Calendar
-                </a>
-                <a href="#" class="nav-item">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-                    Tasks
-                </a>
-                <a href="#" class="nav-item">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                    Analytics
-                </a> -->
             </nav>
             <div class="sidebar-footer">
                 <div class="user-chip">
@@ -53,10 +41,77 @@
                 <div class="topbar-right">
                     <span class="status-pill" id="statusPill">
                         <span class="status-dot"></span>
-                        <span class="status-text"></span>
+                        Ready
                     </span>
                 </div>
             </header>
+
+            <!-- ============================================================
+                 Calendar + To-Do Section (above input box)
+                 ============================================================ -->
+            <section class="cal-todo-section">
+
+                <!-- Top action bar -->
+                <div class="cal-todo-bar">
+                    <button class="btn-connect-cal" id="connectCalBtn" onclick="connectGoogleCalendar()">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+                        </svg>
+                        <span id="connectCalBtnLabel">Connect Google Calendar</span>
+                    </button>
+                    <button class="btn-prioritize" onclick="prioritizeMyDay()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                        Prioritize My Day
+                    </button>
+                </div>
+
+                <!-- Two-column grid: Meetings | To-Do -->
+                <div class="cal-todo-grid">
+
+                    <!-- Today's Meetings -->
+                    <div class="cal-card">
+                        <div class="cal-card-header">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                            Today's Meetings
+                        </div>
+                        <div id="meetingsList" class="meetings-list">
+                            <div class="cal-empty-state">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                                <p>Connect Google Calendar to see your meetings</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- My To-Do List -->
+                    <div class="cal-card">
+                        <div class="cal-card-header">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+                            My To-Do List
+                        </div>
+                        <div id="todoList" class="todo-list">
+                            <!-- Tasks rendered by JS -->
+                        </div>
+                        <div class="todo-add-row">
+                            <input type="text" id="newTaskInput" class="todo-add-input" placeholder="Add a new task…" />
+                            <button class="todo-add-btn" onclick="addTask()">Add</button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- AI-Prioritized Plan (hidden until generated) -->
+                <div id="aiPlanSection" class="ai-plan-section" style="display:none;">
+                    <div class="ai-plan-header">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        AI-Prioritized Plan
+                    </div>
+                    <div id="aiPlanList" class="ai-plan-list"></div>
+                </div>
+
+            </section>
+            <!-- END Calendar + To-Do Section -->
 
             <!-- Input Card -->
             <section class="input-card">

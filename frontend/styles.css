@@ -238,13 +238,6 @@ body {
     gap: 12px;
 }
 
-.topbar-right {
-    display: flex;
-    align-items: center;
-    max-width: fit-content;
-    width: 100%;
-}
-
 .page-title {
     font-size: 16px;
     font-weight: 600;
@@ -973,4 +966,403 @@ body {
     .main-content > * { margin-left: 16px; margin-right: 16px; }
     .dashboard-grid { grid-template-columns: 1fr; }
     .page-subtitle { display: none; }
+}
+
+/* ============================================================
+   Calendar + To-Do Section
+   ============================================================ */
+
+.cal-todo-section {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Top action bar */
+.cal-todo-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.btn-connect-cal {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 18px;
+    background: #fff;
+    border: 1.5px solid var(--brand-border);
+    border-radius: var(--radius-md);
+    color: var(--brand);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    box-shadow: var(--shadow-xs);
+}
+
+.btn-connect-cal:hover {
+    background: var(--brand-light);
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.08);
+}
+
+.btn-connect-cal.connected {
+    background: var(--success-light);
+    border-color: var(--success-border);
+    color: #065f46;
+}
+
+.btn-connect-cal.connected svg {
+    stroke: var(--success);
+}
+
+.btn-prioritize {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 20px;
+    background: var(--success);
+    border: none;
+    border-radius: var(--radius-md);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    box-shadow: var(--shadow-sm);
+}
+
+.btn-prioritize:hover {
+    background: #059669;
+}
+
+.btn-prioritize:active {
+    transform: scale(0.97);
+}
+
+/* Two-column grid */
+.cal-todo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 860px) {
+    .cal-todo-grid { grid-template-columns: 1fr; }
+}
+
+/* Shared card */
+.cal-card {
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+}
+
+.cal-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 13px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-700);
+    border-bottom: 1px solid var(--gray-100);
+    background: var(--gray-50);
+}
+
+.cal-card-header svg {
+    color: var(--gray-400);
+    flex-shrink: 0;
+}
+
+/* Meetings list */
+.meetings-list {
+    padding: 10px 14px;
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.meeting-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 10px;
+    border-radius: var(--radius-md);
+    transition: background 0.15s;
+    cursor: default;
+}
+
+.meeting-item:hover {
+    background: var(--gray-50);
+}
+
+.meeting-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--brand-light);
+    border: 1px solid var(--brand-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--brand);
+}
+
+.meeting-time {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--gray-500);
+    min-width: 72px;
+    flex-shrink: 0;
+}
+
+.meeting-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-800);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cal-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 28px 16px;
+    gap: 8px;
+    color: var(--gray-300);
+    text-align: center;
+}
+
+.cal-empty-state p {
+    font-size: 12.5px;
+    color: var(--gray-400);
+    line-height: 1.5;
+}
+
+/* To-Do list */
+.todo-list {
+    padding: 10px 14px 4px;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.todo-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    transition: background 0.15s;
+    cursor: pointer;
+}
+
+.todo-item:hover {
+    background: var(--gray-50);
+}
+
+.todo-item input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--success);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.todo-item-label {
+    font-size: 13px;
+    color: var(--gray-700);
+    flex: 1;
+    transition: color 0.2s;
+    line-height: 1.4;
+}
+
+.todo-item.done .todo-item-label {
+    text-decoration: line-through;
+    color: var(--gray-400);
+}
+
+.todo-item-delete {
+    opacity: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--gray-400);
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.todo-item:hover .todo-item-delete {
+    opacity: 1;
+}
+
+.todo-item-delete:hover {
+    color: var(--danger);
+    background: var(--danger-light);
+}
+
+/* Add task row */
+.todo-add-row {
+    display: flex;
+    gap: 8px;
+    padding: 8px 14px 14px;
+    border-top: 1px solid var(--gray-100);
+    margin-top: 4px;
+}
+
+.todo-add-input {
+    flex: 1;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: 7px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    color: var(--gray-800);
+    background: var(--gray-50);
+    transition: border-color 0.2s, background 0.2s;
+    outline: none;
+}
+
+.todo-add-input:focus {
+    border-color: var(--brand);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.08);
+}
+
+.todo-add-input::placeholder {
+    color: var(--gray-400);
+}
+
+.todo-add-btn {
+    padding: 7px 18px;
+    background: var(--success);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+
+.todo-add-btn:hover {
+    background: #059669;
+}
+
+/* AI-Prioritized Plan */
+.ai-plan-section {
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    animation: fadeUp 0.3s ease-out;
+}
+
+.ai-plan-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 13px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(90deg, var(--brand) 0%, #6366f1 100%);
+}
+
+.ai-plan-header svg {
+    flex-shrink: 0;
+}
+
+.ai-plan-list {
+    padding: 6px 0 8px;
+    display: flex;
+    flex-direction: column;
+}
+
+.ai-plan-item {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--gray-100);
+    transition: background 0.15s;
+}
+
+.ai-plan-item:last-child {
+    border-bottom: none;
+}
+
+.ai-plan-item:hover {
+    background: var(--gray-50);
+}
+
+.ai-plan-num {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--brand);
+    min-width: 22px;
+    flex-shrink: 0;
+}
+
+.ai-plan-task {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--gray-800);
+    flex-shrink: 0;
+}
+
+.ai-plan-time {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--gray-500);
+    flex-shrink: 0;
+}
+
+.ai-plan-note {
+    font-size: 12px;
+    color: var(--gray-400);
+    font-style: italic;
+    flex: 1;
+}
+
+/* Loading shimmer for plan */
+.ai-plan-loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 20px;
+    color: var(--gray-500);
+    font-size: 13px;
+}
+
+.ai-plan-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--brand-border);
+    border-top-color: var(--brand);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+    flex-shrink: 0;
 }
