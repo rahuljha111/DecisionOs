@@ -21,6 +21,7 @@ client = AsyncOpenAI(
 MODEL = "gemini-2.0-flash"
 TEMPERATURE = 0.2
 MAX_RETRIES = 2
+USE_LLM_PLANNER = os.getenv("DECISIONOS_USE_LLM_PLANNER", "false").lower() in {"1", "true", "yes"}
 
 PLANNER_SYSTEM_PROMPT = """You are a data extraction agent. Your ONLY job is to extract structured information from the user's message.
 
@@ -64,6 +65,91 @@ def _rule_based_parser(message: str) -> Dict[str, Any]:
         Extracted data dictionary
     """
     message_lower = message.lower()
+
+    # Structured format parser: "Calendar: ... Todos: ..."
+    calendar_items = []
+    todo_items = []
+    cal_match = re.search(r"calendar\s*:\s*(.*?)(?:todos?\s*:|$)", message, re.IGNORECASE | re.DOTALL)
+    todo_match = re.search(r"todos?\s*:\s*(.*)$", message, re.IGNORECASE | re.DOTALL)
+
+    def _split_items(block: str) -> list[str]:
+        if not block:
+            return []
+        normalized = re.sub(r"\band\b", ",", block, flags=re.IGNORECASE)
+        parts = [p.strip(" .\n\t") for p in normalized.split(",")]
+        return [p for p in parts if p and p.lower() != "none"]
+
+    if cal_match:
+        calendar_items = _split_items(cal_match.group(1))
+    if todo_match:
+        todo_items = _split_items(todo_match.group(1))
+
+    non_negotiable_keywords = ["exam", "interview", "deadline", "submission"]
+    high_impact_keywords = ["urgent bug", "bug", "assignment", "project", "coding", "release", "revise", "revision", "outage", "payments", "high-impact"]
+    medium_keywords = ["meeting", "class", "sync", "demo"]
+    low_keywords = ["gym", "hangout", "youtube", "series", "social media", "gaming", "practice", "reading"]
+
+    def _priority_score(text: str) -> int:
+        t = text.lower()
+        if any(k in t for k in non_negotiable_keywords):
+            return 4
+        if any(k in t for k in high_impact_keywords):
+            return 3
+        if any(k in t for k in medium_keywords):
+            return 2
+        if any(k in t for k in low_keywords):
+            return 1
+        return 2
+
+    primary_item = None
+    if todo_items:
+        primary_item = max(todo_items, key=_priority_score)
+    elif calendar_items:
+        primary_item = max(calendar_items, key=_priority_score)
+
+    if primary_item:
+        primary_score = _priority_score(primary_item)
+        conflicting_candidates = [i for i in calendar_items if i != primary_item]
+        if conflicting_candidates:
+            conflicting_item = min(conflicting_candidates, key=_priority_score)
+        else:
+            conflicting_item = None
+
+        def _detect_event_type(text: str) -> Optional[str]:
+            if not text:
+                return None
+            t = text.lower()
+            for keyword in ["exam", "interview", "deadline", "meeting", "gym", "class", "practice", "call", "appointment", "demo"]:
+                if keyword in t:
+                    return keyword
+            return None
+
+        task_type = _detect_event_type(primary_item) or "work"
+        event_type_structured = _detect_event_type(conflicting_item) if conflicting_item else None
+        urgency_keywords = [k for k in non_negotiable_keywords + high_impact_keywords if k in primary_item.lower()]
+
+        deadline_raw = None
+        deadline_match = re.search(r"(today|tonight|tomorrow|in\s+\d+\s*(hours?|hrs?|minutes?|mins?))", primary_item.lower())
+        if deadline_match:
+            deadline_raw = deadline_match.group(1)
+
+        constraints = []
+        if conflicting_item:
+            constraints.append(f"{conflicting_item} conflicts with {primary_item}")
+
+        return {
+            "task_type": task_type,
+            "task_description": primary_item,
+            "raw_input": message,
+            "deadline_raw": deadline_raw,
+            "event_raw": conflicting_item,
+            "event_type": event_type_structured,
+            "constraints": constraints,
+            "context": "structured calendar/todos input",
+            "urgency_keywords": urgency_keywords,
+            "parse_error": False,
+            "parser_used": "rule_based_structured"
+        }
     
     # Detect task type from keywords
     task_type = None
@@ -151,6 +237,7 @@ def _rule_based_parser(message: str) -> Dict[str, Any]:
     return {
         "task_type": task_type or "general task",
         "task_description": message,
+        "raw_input": message,
         "deadline_raw": deadline_raw,
         "event_raw": event_raw,
         "event_type": event_type,
@@ -174,6 +261,11 @@ async def run_planner_agent(message: str) -> Dict[str, Any]:
         Dictionary with extracted data
     """
     last_error = None
+
+    if not USE_LLM_PLANNER:
+        result = _rule_based_parser(message)
+        result["llm_error"] = "disabled_for_deterministic_mode"
+        return result
     
     # Try LLM with retries
     for attempt in range(MAX_RETRIES):
@@ -195,6 +287,7 @@ async def run_planner_agent(message: str) -> Dict[str, Any]:
                 result = {
                     "task_type": parsed.get("task_type"),
                     "task_description": parsed.get("task_description") or message,
+                    "raw_input": message,
                     "deadline_raw": parsed.get("deadline_raw"),
                     "event_raw": parsed.get("event_raw") or parsed.get("meeting_raw"),
                     "event_type": parsed.get("event_type") or ("meeting" if parsed.get("meeting_raw") else None),

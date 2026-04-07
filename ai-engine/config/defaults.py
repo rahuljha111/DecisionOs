@@ -74,6 +74,10 @@ LOW_PRIORITY_EVENTS = {
     "casual meeting", "catch up"
 }
 
+NON_NEGOTIABLE_EVENTS = {
+    "exam", "examination", "interview", "job interview", "deadline", "submission"
+}
+
 MEDIUM_PRIORITY_EVENTS = {
     "meeting", "call", "sync",
     "class", "lecture", "seminar",
@@ -218,6 +222,15 @@ def is_high_priority_task(task_type: str) -> bool:
 def is_low_priority_event(event_type: str) -> bool:
     """Check if an event is low priority."""
     return classify_event_priority(event_type) == "low"
+
+
+def is_non_negotiable_event(event_type: str) -> bool:
+    """Check if an event should not be rescheduled in a real-world decision."""
+    if not event_type:
+        return False
+
+    event_lower = event_type.lower().strip()
+    return any(keyword in event_lower for keyword in NON_NEGOTIABLE_EVENTS)
 
 
 def calculate_score(urgency: float, importance: float, feasibility: float) -> float:

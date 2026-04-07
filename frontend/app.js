@@ -9,16 +9,14 @@ const API_BASE = "/api";
 let isProcessing = false;
 let currentDecision = null;
 let pendingAction = null;
+let availableActions = [];
 
 // Calendar & To-Do state
 let calendarConnected = false;
 let todayMeetings = [];
-let todoItems = [
-  { id: 1, text: "Finish Presentation", done: false },
-  { id: 2, text: "Go to the gym", done: false },
-  { id: 3, text: "Reply to Emails", done: false },
-];
-let nextTodoId = 4;
+let todoItems = [];
+let nextTodoId = 1;
+let calendarRefreshTimer = null;
 
 const pill = document.getElementById("statusPill");
 
@@ -30,8 +28,7 @@ statusText.textContent = "Waiting for input";
 
 /**
  * Initiates Google Calendar OAuth flow.
- * If a backend OAuth endpoint is configured it will redirect;
- * otherwise we fall back to a simulated demo connection.
+ * Uses backend OAuth endpoint and fetches real events.
  */
 async function connectGoogleCalendar() {
   const btn = document.getElementById("connectCalBtn");
@@ -52,16 +49,14 @@ async function connectGoogleCalendar() {
   btn.disabled = true;
 
   try {
-    // Try the real backend OAuth endpoint first
-    const checkRes = await fetch(`${API_BASE}/calendar/auth_url`).catch(
-      () => null,
-    );
+      const checkRes = await fetch(`${API_BASE}/calendar/auth_url`).catch(() => null);
 
     if (checkRes && checkRes.ok) {
-      const { auth_url } = await checkRes.json();
+        const { auth_url } = await checkRes.json();
+        const target = auth_url || `${API_BASE}/calendar/auth`;
 
       // Open OAuth popup
-      const popup = window.open(auth_url, "gcal_oauth", "width=500,height=620");
+        const popup = window.open(target, "gcal_oauth", "width=500,height=620");
 
       // Poll for popup close & then fetch events
       const pollTimer = setInterval(async () => {
@@ -71,12 +66,14 @@ async function connectGoogleCalendar() {
         }
       }, 500);
     } else {
-      // Backend not available → simulate demo data
-      await simulateCalendarConnection();
+      showToast("Calendar auth endpoint not available. Start backend server first.", "error");
     }
   } catch (err) {
-    await simulateCalendarConnection();
+    showToast("Google Calendar connection failed. Check credentials and token setup.", "error");
   } finally {
+    if (!calendarConnected) {
+      label.textContent = "Connect Google Calendar";
+    }
     btn.disabled = false;
   }
 }
@@ -99,31 +96,33 @@ async function fetchCalendarEvents() {
     const data = await res.json();
     todayMeetings = (data.events || []).map((e) => ({
       time: e.start_time || e.time || "",
-      title: e.title || e.summary || "Meeting",
+      title: e.title || e.summary || "Event",
     }));
 
     setCalendarConnected();
   } catch (err) {
-    // Fall back to demo on any fetch error
-    await simulateCalendarConnection();
+    showToast("Unable to fetch calendar events from backend.", "error");
+  }
+}
+
+function startCalendarAutoRefresh() {
+  stopCalendarAutoRefresh();
+  calendarRefreshTimer = setInterval(() => {
+    if (calendarConnected) {
+      fetchCalendarEvents();
+    }
+  }, 60000);
+}
+
+function stopCalendarAutoRefresh() {
+  if (calendarRefreshTimer) {
+    clearInterval(calendarRefreshTimer);
+    calendarRefreshTimer = null;
   }
 }
 
 /**
- * Demo/fallback: populate with sample meetings so the UI isn't empty.
  */
-async function simulateCalendarConnection() {
-  // Simulate a short network delay
-  await delay(900);
-
-  todayMeetings = [
-    { time: "10:00 AM", title: "Team Standup" },
-    { time: "12:30 PM", title: "Client Call" },
-    { time: "03:00 PM", title: "Review Meeting" },
-  ];
-
-  setCalendarConnected();
-}
 
 function setCalendarConnected() {
   calendarConnected = true;
@@ -135,9 +134,24 @@ function setCalendarConnected() {
   label.textContent = "✓ Calendar Connected";
 
   renderMeetings();
+  startCalendarAutoRefresh();
 }
 
-// ─── Render Meetings ──────────────────────────────────────────────────────────
+async function checkCalendarStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/calendar/status`);
+    if (!res.ok) return;
+
+    const status = await res.json();
+    if (status.authenticated) {
+      await fetchCalendarEvents();
+    }
+  } catch (_err) {
+    // Ignore status probe errors; manual connect button remains available.
+  }
+}
+
+// ─── Render Events ────────────────────────────────────────────────────────────
 function renderMeetings() {
   const list = document.getElementById("meetingsList");
 
@@ -148,7 +162,7 @@ function renderMeetings() {
                     <rect x="3" y="4" width="18" height="18" rx="2"/>
                     <path d="M16 2v4M8 2v4M3 10h18"/>
                 </svg>
-                <p>Connect Google Calendar to see your meetings</p>
+                <p>Connect Google Calendar to see your events</p>
             </div>`;
     return;
   }
@@ -414,14 +428,20 @@ async function submitDecision() {
     return;
   }
 
-  // Build message from tasks
+  // Build message from tasks and current calendar context
   const taskList = pendingTasks
     .map((task, i) => `${i + 1}. ${task}`)
     .join(", ");
 
+  const meetingList = todayMeetings.length
+    ? todayMeetings
+        .map((meeting, i) => `${i + 1}. ${meeting.title} at ${meeting.time}`)
+        .join(", ")
+    : "No calendar events found";
+
   console.log("taskList", taskList);
 
-  const message = `I have the following tasks to prioritize today: ${taskList}. What is the best order and timing for these tasks? Please help me organize them efficiently.`;
+  const message = `I have the following tasks to prioritize today: ${taskList}. My calendar events are: ${meetingList}. Use this calendar context to identify conflicts, prioritize tasks, and suggest rescheduling when needed.`;
 
   console.log("message", message);
 
@@ -661,6 +681,10 @@ function displayFinalDecision(data) {
 
   const decisionText =
     decision.decision_text || formatOptionName(decision.action);
+  const reasonText = decision.reasoning || "No reason provided.";
+  const consequenceText =
+    decision.consequence ||
+    "If you ignore this decision, the highest-impact risk will remain unresolved.";
 
   let conflictBadge = "";
   if (decision.conflict_type && decision.conflict_type !== "none") {
@@ -673,29 +697,35 @@ function displayFinalDecision(data) {
 
   container.innerHTML = `
         <div class="decision-result">
-            <div class="decision-action">
-                <span class="action-icon">🎯</span>
-                <span class="action-text">${decisionText}</span>
+        <div class="decision-section">
+          <div class="decision-section-label">[Decision]</div>
+          <div class="decision-action">
+            <span class="action-icon">🎯</span>
+            <span class="action-text">${decisionText}</span>
+          </div>
             </div>
             ${conflictBadge}
-            <div class="decision-confidence confidence-${confidenceClass}">
-                <div class="confidence-row">
-                    <span class="confidence-label">Confidence</span>
-                    <span class="confidence-value">${Math.round(decision.confidence * 100)}%</span>
+        <div class="decision-section">
+          <div class="decision-section-label">[Reason]</div>
+          <div class="decision-reasoning">
+            <p>${reasonText}</p>
                 </div>
-                <div class="confidence-bar">
-                    <div class="confidence-fill" style="width: ${decision.confidence * 100}%"></div>
+        </div>
+        <div class="decision-section">
+          <div class="decision-section-label">[Consequence]</div>
+          <div class="decision-consequence">
+            <p>${consequenceText}</p>
                 </div>
             </div>
-            ${
-              decision.reasoning
-                ? `
-            <div class="decision-reasoning">
-                <h4>Why this decision?</h4>
-                <p>${decision.reasoning}</p>
-            </div>`
-                : ""
-            }
+        <div class="decision-confidence confidence-${confidenceClass}">
+          <div class="confidence-row">
+            <span class="confidence-label">Confidence</span>
+            <span class="confidence-value">${Math.round(decision.confidence * 100)}%</span>
+          </div>
+          <div class="confidence-bar">
+            <div class="confidence-fill" style="width: ${decision.confidence * 100}%"></div>
+          </div>
+        </div>
             ${
               decision.next_steps?.length
                 ? `
@@ -738,6 +768,7 @@ function displayActionButtons(decision) {
   }
 
   const allActions = [...actions, ...inferredActions];
+  availableActions = allActions;
 
   if (allActions.length === 0) {
     section.style.display = "none";
@@ -745,7 +776,7 @@ function displayActionButtons(decision) {
   }
 
   container.innerHTML = allActions
-    .map((act) => {
+    .map((act, index) => {
       const icon = act.icon || getActionIcon(act.type);
       const label = act.label || formatOptionName(act.type);
       const eid = act.event_id || act.eventId || "";
@@ -753,7 +784,7 @@ function displayActionButtons(decision) {
 
       return `
             <button class="action-btn"
-                onclick="executeAction('${act.type}', '${eid}', '${etitle}')">
+                onclick="executeActionByIndex(${index})">
                 <span class="action-btn-icon">${icon}</span>
                 <span class="action-btn-label">${label}</span>
                 ${etitle ? `<span class="action-btn-detail">${etitle}</span>` : ""}
@@ -776,9 +807,23 @@ function getActionIcon(type) {
   );
 }
 
+function executeActionByIndex(index) {
+  const action = availableActions[index];
+  if (!action) {
+    showError("Unable to execute action: missing action payload.");
+    return;
+  }
+
+  const actionType = action.type || action.action || "";
+  const eventId = action.event_id || action.eventId || "";
+  const eventTitle = action.event_title || action.eventTitle || "";
+
+  executeAction(actionType, eventId, eventTitle, action);
+}
+
 // ─── Execute Action ───────────────────────────────────────────────────────────
-function executeAction(actionType, eventId, eventTitle) {
-  pendingAction = { actionType, eventId, eventTitle };
+function executeAction(actionType, eventId, eventTitle, actionData = null) {
+  pendingAction = { actionType, eventId, eventTitle, actionData };
 
   const modal = document.getElementById("confirmModal");
   const message = document.getElementById("confirmMessage");
@@ -801,11 +846,26 @@ async function confirmAction() {
     return;
   }
 
-  const { actionType, eventId } = pendingAction;
+  const { actionType, eventId, actionData } = pendingAction;
   closeModal();
 
   try {
     const userId = document.getElementById("userId").value.trim() || "user_001";
+
+    const params = {
+      ...(actionData?.params || {}),
+    };
+
+    if (actionData?.suggested_time && !params.new_start_time) {
+      params.suggested_time = actionData.suggested_time;
+    }
+
+    if (actionType === "reschedule_event") {
+      const nextTask = todoItems.find((task) => !task.done);
+      if (nextTask && !params.create_focus_event_title) {
+        params.create_focus_event_title = `Focus: ${nextTask.text}`;
+      }
+    }
 
     const response = await fetch(`${API_BASE}/execute_action`, {
       method: "POST",
@@ -814,14 +874,20 @@ async function confirmAction() {
         user_id: userId,
         action_type: actionType,
         event_id: eventId,
-        params: {},
+        params,
       }),
     });
 
     const result = await response.json();
 
     if (result.success) {
-      showSuccess(result.message || "Action executed successfully!");
+      const focusMessage = result.focus_event?.created
+        ? ` Focus block created: ${result.focus_event.title}`
+        : "";
+      showSuccess((result.message || "Action executed successfully!") + focusMessage);
+      if (calendarConnected) {
+        await fetchCalendarEvents();
+      }
     } else {
       showError(result.message || "Action failed.");
     }
@@ -966,4 +1032,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // Render initial to-do list
   renderTodos();
   renderMeetings();
+  checkCalendarStatus();
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && calendarConnected) {
+      fetchCalendarEvents();
+    }
+  });
 });

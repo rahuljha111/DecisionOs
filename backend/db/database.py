@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker, relationship
 # PostgreSQL Database URL
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://postgres:1234@localhost:5432/decisionos"
+    "sqlite:///./decisionos.db"
 )
 
 # Create engine

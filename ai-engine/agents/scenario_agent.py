@@ -7,6 +7,7 @@ CRITICAL RULES:
 - If conflict exists AND task is HIGH priority:
   * attending low priority event = score < 30
   * skipping low priority event = score > 80
+- Exams/interviews/deadlines are fixed: never suggest rescheduling them
 - MUST trigger when has_conflict == True
 """
 
@@ -20,7 +21,8 @@ from ai_engine.config.defaults import (
     CONFLICT_SCORE_PENALTIES,
     classify_event_priority,
     is_high_priority_task,
-    is_low_priority_event
+    is_low_priority_event,
+    is_non_negotiable_event
 )
 
 # Initialize Gemini client
@@ -111,11 +113,18 @@ async def run_scenario_agent(
     if not alternatives or len(alternatives) < 3:
         # Generate default alternatives based on event type
         event_type = calendar_result.get("event_type", "event")
-        alternatives = [
-            f"attend_{event_type}",
-            f"skip_{event_type}",
-            f"reschedule_{event_type}"
-        ]
+        if is_non_negotiable_event(event_type):
+            alternatives = [
+                f"attend_{event_type}",
+                f"skip_{event_type}",
+                "focus_on_task"
+            ]
+        else:
+            alternatives = [
+                f"attend_{event_type}",
+                f"skip_{event_type}",
+                f"reschedule_{event_type}"
+            ]
         alternative_details = {a: {"action": a} for a in alternatives}
     
     # Take exactly 3 alternatives
@@ -343,6 +352,7 @@ def _score_scenarios_differentiated(
     task_priority = calendar_result.get("task_priority", "medium")
     event_priority = calendar_result.get("event_priority", "medium")
     event_type = calendar_result.get("event_type", "event")
+    fixed_event = is_non_negotiable_event(event_type)
     
     # Also check from extracted data for task type
     task_type = task_analysis.get("task_type", "")
@@ -393,22 +403,39 @@ def _score_scenarios_differentiated(
             else:
                 score = base_score
         
-        # RULE 3: Both high priority - favor task if urgency high
+        # RULE 3: Fixed high-priority event - attend it, do not reschedule it
+        elif has_conflict and event_priority == "high" and fixed_event:
+            if "attend" in action:
+                score = max(90, base_score + 30)
+            elif "reschedule" in action:
+                score = min(15, base_score - 50)
+            elif "skip" in action:
+                score = min(10, base_score - 60)
+            else:
+                score = base_score
+
+        # RULE 4: Both high priority but event is flexible
         elif has_conflict and task_priority == "high" and event_priority == "high":
             if urgency >= 8:
-                if "skip" in action:
-                    score = base_score + 20
-                elif "attend" in action:
-                    score = base_score - 15
-                else:
-                    score = base_score + 5
-            else:
-                if "reschedule" in action:
-                    score = base_score + 15
+                if "attend" in action:
+                    score = base_score + 10
+                elif "reschedule" in action:
+                    score = base_score - 10
+                elif "skip" in action:
+                    score = base_score - 25
                 else:
                     score = base_score
-        
-        # RULE 4: Standard scoring when no hard rules apply
+            else:
+                if "attend" in action:
+                    score = base_score + 8
+                elif "reschedule" in action:
+                    score = base_score + 2
+                elif "skip" in action:
+                    score = base_score - 20
+                else:
+                    score = base_score
+
+        # RULE 5: Standard scoring when no hard rules apply
         else:
             # Action-specific adjustments
             if "skip" in action:

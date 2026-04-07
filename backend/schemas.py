@@ -128,6 +128,7 @@ class FinalDecision(BaseModel):
     """Output from the Decision Engine."""
     action: str = Field(..., description="The recommended action")
     decision_text: str = Field(default="", description="Human-readable decision statement")
+    consequence: Optional[str] = Field(default=None, description="What happens if the user ignores this decision")
     confidence: float = Field(ge=0, le=1, description="Confidence score 0-1")
     reasoning: str = Field(..., description="Explanation for the decision")
     next_steps: List[str] = Field(default_factory=list)

@@ -198,6 +198,16 @@ MCP (Model Context Protocol) Tools execute real-world actions:
 
 ## 🚀 Setup Instructions
 
+## ✅ Production Regression Check
+
+Run the decision regression suite (15 user scenarios + extra edge cases):
+
+```bash
+.venv\Scripts\python.exe backend/tools/decision_regression_suite.py
+```
+
+This validates that decisions are specific, actionable, and free from generic fallback phrasing.
+
 ### Prerequisites
 
 - Python 3.10+

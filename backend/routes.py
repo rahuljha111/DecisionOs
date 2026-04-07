@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 import json
+from pydantic import BaseModel, Field
 
 from backend.db.database import get_db, Decision, CalendarEvent, Task, get_or_create_user, User
 from backend.schemas import DecisionRequest, EventCreate, TaskCreate, ExecuteActionRequest
@@ -20,6 +21,30 @@ from backend.tools.google_calendar import (
 )
 
 router = APIRouter()
+
+
+class PrioritizeRequest(BaseModel):
+    """Request schema for day prioritization."""
+    user_id: str
+    tasks: List[str] = Field(default_factory=list)
+    meetings: List[dict] = Field(default_factory=list)
+
+
+def _parse_datetime(value):
+    """Parse datetime from ISO strings while accepting datetime values directly."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
 
 
 @router.post("/decide")
@@ -67,7 +92,7 @@ async def get_user_decisions(
     Returns:
         List of past decisions
     """
-    user = db.query(get_or_create_user.__wrapped__(db, user_id).__class__).filter_by(user_id=user_id).first()
+    user = db.query(User).filter_by(user_id=user_id).first()
     
     if not user:
         return {"decisions": [], "count": 0}
@@ -360,9 +385,20 @@ async def google_calendar_authenticate():
         )
 
 
+@router.get("/calendar/auth_url")
+async def google_calendar_auth_url():
+    """
+    Return backend URL used by frontend to trigger OAuth flow.
+    """
+    return {
+        "auth_url": "/api/calendar/auth"
+    }
+
+
 @router.get("/calendar/events")
 async def get_google_calendar_events(
     hours: int = 24,
+    user_id: str = "system",
     db: Session = Depends(get_db)
 ):
     """
@@ -377,12 +413,13 @@ async def get_google_calendar_events(
     """
     from backend.tools.mcp_tools import MCPTools
     
-    mcp = MCPTools(db, "system")
+    mcp = MCPTools(db, user_id)
     
     now = datetime.now()
-    end = now + timedelta(hours=hours)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
     
-    events, source = mcp.get_events_in_range(now, end)
+    events, source = mcp.get_events_in_range(start, end)
     
     # Serialize events
     serialized = []
@@ -399,10 +436,70 @@ async def get_google_calendar_events(
         "events": serialized,
         "count": len(events),
         "source": source,
+        "user_id": user_id,
         "time_window": {
-            "start": now.isoformat(),
+            "start": start.isoformat(),
             "end": end.isoformat()
         }
+    }
+
+
+@router.post("/prioritize")
+async def prioritize_day(
+    request: PrioritizeRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Build a practical daily plan using tasks plus real calendar events.
+    """
+    from backend.tools.mcp_tools import MCPTools
+
+    mcp = MCPTools(db, request.user_id)
+    now = datetime.now()
+    day_end = now.replace(hour=22, minute=0, second=0, microsecond=0)
+
+    events, _source = mcp.get_events_in_range(now, day_end)
+    normalized_events = []
+    for event in events:
+        start_time = _parse_datetime(event.get("start_time"))
+        end_time = _parse_datetime(event.get("end_time"))
+        if start_time and end_time and end_time > start_time:
+            normalized_events.append((start_time, end_time))
+    normalized_events.sort(key=lambda slot: slot[0])
+
+    cursor = now
+    plan = []
+    task_duration = timedelta(minutes=60)
+
+    for task in request.tasks:
+        while True:
+            conflict = None
+            for start_time, end_time in normalized_events:
+                if cursor < end_time and (cursor + task_duration) > start_time:
+                    conflict = (start_time, end_time)
+                    break
+            if conflict is None:
+                break
+            cursor = conflict[1] + timedelta(minutes=15)
+
+        if cursor + task_duration > day_end:
+            break
+
+        slot_end = cursor + task_duration
+        plan.append(
+            {
+                "task": task,
+                "start": cursor.strftime("%I:%M %p"),
+                "end": slot_end.strftime("%I:%M %p"),
+                "note": "Scheduled around existing calendar events",
+            }
+        )
+        cursor = slot_end + timedelta(minutes=15)
+
+    return {
+        "plan": plan,
+        "count": len(plan),
+        "calendar_event_count": len(normalized_events),
     }
 
 
@@ -461,23 +558,56 @@ async def execute_action(
             # Reschedule an event
             if not event_id:
                 return {"success": False, "message": "Event ID required for reschedule action"}
-            new_start = params.get("new_start_time")
-            new_end = params.get("new_end_time")
+            existing_event = db.query(CalendarEvent).filter(
+                CalendarEvent.event_id == event_id,
+                CalendarEvent.user_id == mcp.user.id
+            ).first()
+
+            new_start = _parse_datetime(params.get("new_start_time"))
+            new_end = _parse_datetime(params.get("new_end_time"))
+
+            suggested_start = _parse_datetime(params.get("suggested_time"))
+
+            if suggested_start and not new_start:
+                new_start = suggested_start
+
+            if new_start and not new_end:
+                event = db.query(CalendarEvent).filter(CalendarEvent.event_id == event_id).first()
+                if event and event.end_time and event.start_time:
+                    original_duration = event.end_time - event.start_time
+                    new_end = new_start + original_duration
+                else:
+                    new_end = new_start + timedelta(hours=1)
+
             if not new_start or not new_end:
                 # Default: reschedule to 2 hours later
-                event = db.query(CalendarEvent).filter(CalendarEvent.event_id == event_id).first()
+                event = existing_event or db.query(CalendarEvent).filter(CalendarEvent.event_id == event_id).first()
                 if event:
                     new_start = event.start_time + timedelta(hours=2)
                     new_end = event.end_time + timedelta(hours=2)
                 else:
                     return {"success": False, "message": "Event not found and no new time provided"}
             result = mcp.reschedule_event(event_id, new_start, new_end)
+
+            focus_title = (params.get("create_focus_event_title") or "").strip()
+            if result.get("success") and focus_title and existing_event:
+                focus_result = mcp.create_event(
+                    title=focus_title,
+                    start_time=existing_event.start_time,
+                    end_time=existing_event.end_time,
+                    description="Auto-created focus block after rescheduling a conflicting event",
+                )
+                result["focus_event"] = {
+                    "created": bool(focus_result.get("success")),
+                    "event_id": focus_result.get("event_id"),
+                    "title": focus_result.get("title"),
+                }
             
         elif action_type == "create_event":
             # Create a new event
             title = params.get("title", "New Event")
-            start_time = params.get("start_time")
-            end_time = params.get("end_time")
+            start_time = _parse_datetime(params.get("start_time"))
+            end_time = _parse_datetime(params.get("end_time"))
             description = params.get("description")
             if not start_time or not end_time:
                 return {"success": False, "message": "Start and end time required for create action"}
@@ -488,7 +618,7 @@ async def execute_action(
             title = params.get("title", "New Task")
             description = params.get("description")
             priority = params.get("priority", 5)
-            deadline = params.get("deadline")
+            deadline = _parse_datetime(params.get("deadline"))
             duration = params.get("estimated_duration")
             result = mcp.add_task(title, description, priority, deadline, duration)
             
