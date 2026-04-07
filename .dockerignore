@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+.env
+.env.*
+credentials.json
+token.json
+.vscode
+*.log
