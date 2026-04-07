@@ -400,16 +400,30 @@ function escapeHtml(str) {
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
 async function submitDecision() {
-  const messageInput = document.getElementById("messageInput");
   const userIdInput = document.getElementById("userId");
-
-  const message = messageInput.value.trim();
   const userId = userIdInput.value.trim() || "user_001";
 
-  if (!message) {
-    showError("Please enter a decision request.");
+  // Get pending tasks from to-do list
+  const pendingTasks = todoItems.filter((t) => !t.done).map((t) => t.text);
+
+  console.log("pendingTasks", pendingTasks);
+
+  // Check if there are any tasks
+  if (pendingTasks.length === 0) {
+    showToast("Please create To Do list", "warning");
     return;
   }
+
+  // Build message from tasks
+  const taskList = pendingTasks
+    .map((task, i) => `${i + 1}. ${task}`)
+    .join(", ");
+
+  console.log("taskList", taskList);
+
+  const message = `I have the following tasks to prioritize today: ${taskList}. What is the best order and timing for these tasks? Please help me organize them efficiently.`;
+
+  console.log("message", message);
 
   if (isProcessing) return;
 
@@ -839,6 +853,60 @@ function showError(message) {
     `;
 }
 
+function showToast(message, type = "warning") {
+  // Create a toast container if it doesn't exist
+  let toastContainer = document.getElementById("toastContainer");
+  if (!toastContainer) {
+    toastContainer = document.createElement("div");
+    toastContainer.id = "toastContainer";
+    toastContainer.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 400px;
+    `;
+    document.body.appendChild(toastContainer);
+  }
+
+  const toast = document.createElement("div");
+  const bgColor = type === "warning" ? "#fef3c7" : "#fee2e2";
+  const borderColor = type === "warning" ? "#fcd34d" : "#fca5a5";
+  const textColor = type === "warning" ? "#92400e" : "#991b1b";
+  const icon = type === "warning" ? "⚠️" : "❌";
+
+  toast.style.cssText = `
+    background: ${bgColor};
+    border: 1px solid ${borderColor};
+    border-radius: 8px;
+    padding: 16px;
+    color: ${textColor};
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 500;
+    font-size: 14px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    animation: slideInRight 0.3s ease-out;
+  `;
+
+  toast.innerHTML = `
+    <span style="font-size: 18px; flex-shrink: 0;">${icon}</span>
+    <span>${message}</span>
+  `;
+
+  toastContainer.appendChild(toast);
+
+  // Auto-remove after 4 seconds
+  setTimeout(() => {
+    toast.style.animation = "slideOutRight 0.3s ease-out";
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
 // ─── UI State ─────────────────────────────────────────────────────────────────
 function resetUI() {
   document.getElementById("decisionContainer").innerHTML = `
@@ -858,14 +926,19 @@ function resetUI() {
 function setProcessing(processing) {
   isProcessing = processing;
 
-  const btn = document.getElementById("submitBtn");
-  const btnText = btn.querySelector(".btn-text");
-  const btnLoad = btn.querySelector(".btn-loading");
+  const btn = document.querySelector(".btn-prioritize");
   const pill = document.getElementById("statusPill");
 
-  btn.disabled = processing;
-  btnText.style.display = processing ? "none" : "inline-flex";
-  btnLoad.style.display = processing ? "inline-flex" : "none";
+  if (btn) {
+    btn.disabled = processing;
+    btn.innerHTML = processing
+      ? "Processing…"
+      : `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        Prioritize My Day`;
+  }
 
   if (pill) {
     pill.classList.toggle("processing", processing);
@@ -877,14 +950,6 @@ function setProcessing(processing) {
 
 // ─── Keyboard Shortcuts & Init ────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  // Enter to submit decision
-  document.getElementById("messageInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      submitDecision();
-    }
-  });
-
   // Enter in new-task input
   document.getElementById("newTaskInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
