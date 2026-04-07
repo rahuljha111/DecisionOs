@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DecisionOS</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <h1>⚡ DecisionOS</h1>
+      <p class="subtitle">AI-powered decision assistant</p>
+      <button id="calendarBtn" class="calendar-btn" onclick="connectCalendar()">
+        📅 Connect Google Calendar
+      </button>
+    </div>
+
+    <div class="input-box">
+      <textarea
+        id="input"
+        placeholder="What decision do you need help with? e.g. 'I have an exam in 2 hours and gym now'"
+        rows="3"
+      ></textarea>
+      <button onclick="startDecision()" id="runBtn">Run Decision</button>
+    </div>
+
+    <div id="logs" class="log-box"></div>
+
+    <div id="final" class="final-box"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

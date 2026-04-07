@@ -44,8 +44,8 @@ def _normalize_datetime(dt: Any) -> Optional[datetime]:
         except:
             return None
     if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
-        # Convert to UTC then strip timezone
-        dt = dt.replace(tzinfo=None)
+        # ✅ FIXED
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
 
@@ -317,57 +317,65 @@ def _calculate_available_time_from_events(
     db_events: List[Dict[str, Any]],
     input_event: Optional[Dict[str, Any]]
 ) -> tuple:
-    """
-    Calculate REAL available time by subtracting event durations.
-    
-    Returns:
-        Tuple of (available_hours, blocked_periods)
-    """
-    # Normalize times
+
     current_time = _normalize_datetime(current_time) or datetime.now()
     window_end = _normalize_datetime(window_end) or (current_time + timedelta(hours=24))
-    
-    # Start with total window time
+
     total_hours = (window_end - current_time).total_seconds() / 3600
-    
     if total_hours <= 0:
         return 0.0, []
-    
-    # Collect all events
+
     all_events = list(db_events)
     if input_event:
-        # Check if input event overlaps with any DB event (avoid double counting)
-        is_duplicate = any(
-            _events_overlap(input_event, e) for e in db_events
-        )
+        is_duplicate = any(_events_overlap(input_event, e) for e in db_events)
         if not is_duplicate:
             all_events.append(input_event)
-    
-    # Calculate blocked time
+
+    # ✅ FIX: collect intervals first
+    intervals = []
     blocked_periods = []
-    total_blocked = 0.0
-    
+
     for event in all_events:
         event_start = _normalize_datetime(event.get("start_time"))
         event_end = _normalize_datetime(event.get("end_time"))
-        
+
         if event_start and event_end:
-            # Clip to window
             clip_start = max(event_start, current_time)
             clip_end = min(event_end, window_end)
-            
+
             if clip_start < clip_end:
-                blocked_hours = (clip_end - clip_start).total_seconds() / 3600
-                total_blocked += blocked_hours
+                intervals.append((clip_start, clip_end))
                 blocked_periods.append({
                     "event": event.get("title", "Unknown"),
                     "start": clip_start.isoformat(),
                     "end": clip_end.isoformat(),
-                    "blocked_hours": round(blocked_hours, 2)
+                    "blocked_hours": round(
+                        (clip_end - clip_start).total_seconds() / 3600, 2
+                    )
                 })
-    
+
+    # ✅ FIX: merge overlapping intervals
+    merged = _merge_intervals(intervals)
+
+    total_blocked = sum(
+        (end - start).total_seconds() / 3600
+        for start, end in merged
+    )
+
     available = max(0, total_hours - total_blocked)
     return round(available, 2), blocked_periods
+
+
+# ✅ NEW: merge intervals (prevents double counting)
+def _merge_intervals(intervals):
+    intervals.sort()
+    merged = []
+    for start, end in intervals:
+        if not merged or merged[-1][1] < start:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+    return merged
 
 
 def _events_overlap(event1: Dict[str, Any], event2: Dict[str, Any]) -> bool:
@@ -468,26 +476,35 @@ def _get_primary_event(
     current_time: datetime
 ) -> Optional[Dict[str, Any]]:
     """
-    Get the most relevant event (soonest or currently happening).
+    Get the most relevant upcoming or current event.
     """
     all_events = list(db_events)
     if input_event:
         all_events.append(input_event)
-    
+
     if not all_events:
         return None
-    
-    # Sort by start time (normalize for comparison)
+
     def get_sort_key(e):
         st = _normalize_datetime(e.get("start_time"))
         return st if st else datetime.max
-    
+
     sorted_events = sorted(all_events, key=get_sort_key)
+
+    # ✅ FIX: prefer upcoming or ongoing event
+    for e in sorted_events:
+        st = _normalize_datetime(e.get("start_time"))
+        en = _normalize_datetime(e.get("end_time"))
+
+        if st and en:
+            if st <= current_time < en:  # ongoing
+                return e
+            if st >= current_time:  # next upcoming
+                return e
+
+    return sorted_events[0]
     
-    # Return first event
-    return sorted_events[0] if sorted_events else None
-
-
+ 
 def _generate_alternatives_with_events(
     has_conflict: bool,
     primary_event: Optional[Dict[str, Any]],

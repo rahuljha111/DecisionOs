@@ -7,16 +7,11 @@ Falls back to rule-based parser if LLM fails.
 import os
 import re
 import asyncio
+import google.generativeai as genai
 from typing import Dict, Any, Optional
-from openai import AsyncOpenAI
-
 from ai_engine.utils.helpers import safe_json
 
-# Initialize Gemini client via OpenAI-compatible interface
-client = AsyncOpenAI(
-    api_key=os.environ.get("GEMINI_API_KEY", ""),
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-)
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 MODEL = "gemini-2.0-flash"
 TEMPERATURE = 0.2
@@ -176,18 +171,19 @@ async def run_planner_agent(message: str) -> Dict[str, Any]:
     last_error = None
     
     # Try LLM with retries
+
+    model = genai.GenerativeModel(
+        model_name=MODEL,
+        generation_config={"temperature": TEMPERATURE}
+    )
+
     for attempt in range(MAX_RETRIES):
         try:
-            response = await client.chat.completions.create(
-                model=MODEL,
-                temperature=TEMPERATURE,
-                messages=[
-                    {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
-                    {"role": "user", "content": message}
-                ]
+            response = model.generate_content(
+                f"{PLANNER_SYSTEM_PROMPT}\n\nUser Input:\n{message}"
             )
-            
-            content = response.choices[0].message.content
+
+            content = response.text
             parsed = safe_json(content)
             
             if parsed is not None:
@@ -218,3 +214,7 @@ async def run_planner_agent(message: str) -> Dict[str, Any]:
     result = _rule_based_parser(message)
     result["llm_error"] = last_error
     return result
+
+def _clean_json(text: str) -> str:
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    return match.group(0) if match else text
