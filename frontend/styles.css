@@ -238,6 +238,12 @@ body {
     gap: 12px;
 }
 
+.topbar-right {
+    display: flex;
+    max-width: max-content;
+    width: 100%;
+}
+
 .page-title {
     font-size: 16px;
     font-weight: 600;
