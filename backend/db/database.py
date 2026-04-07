@@ -1,138 +1,105 @@
 """
-Database layer for DecisionOS.
-Uses SQLAlchemy with PostgreSQL (Cloud SQL) or SQLite fallback for local dev.
-
-Tables:
-  - users           : registered users
-  - decisions       : decision pipeline records
-  - events          : calendar events fallback store
-  - user_tokens     : stored Google OAuth2 tokens
+Database configuration and models for DecisionOS.
+PostgreSQL database with real MCP integration.
 """
 
 import os
-from sqlalchemy import (
-    create_engine, Column, Integer, String, Text,
-    Float, DateTime, ForeignKey
-)
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy import text as sql_text
 from datetime import datetime
-from typing import Generator
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, Boolean, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
 
-# ─────────────────────────────────────────────
-# ENGINE SETUP
-# ─────────────────────────────────────────────
-
-def _build_database_url() -> str:
-    """
-    Build DB URL from environment variables.
-    Priority:
-      1. DATABASE_URL (full connection string — set this in Cloud Run secrets)
-      2. SQLite local file (for development only)
-    """
-    url = os.environ.get("DATABASE_URL")
-    if url:
-        # Cloud SQL via Unix socket uses postgresql+pg8000 driver
-        # Example: postgresql+pg8000://user:pass@/dbname?unix_sock=/cloudsql/...
-        return url
-    # Local development fallback
-    return "sqlite:///./decisionos.db"
-
-
-DATABASE_URL = _build_database_url()
-
-# connect_args only needed for SQLite
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-
-engine = create_engine(
-    DATABASE_URL,
-    connect_args=connect_args,
-    pool_pre_ping=True,      # detect stale connections
-    pool_recycle=300,        # recycle connections every 5 min (Cloud SQL)
+# PostgreSQL Database URL
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    "postgresql://postgres:1234@localhost:5432/decisionos"
 )
+
+# Create engine
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 Base = declarative_base()
 
 
-# ─────────────────────────────────────────────
-# MODELS
-# ─────────────────────────────────────────────
-
 class User(Base):
+    """User model for tracking decision history."""
     __tablename__ = "users"
-
-    id          = Column(Integer, primary_key=True, index=True)
-    external_id = Column(String(255), unique=True, index=True, nullable=False)
-    email       = Column(String(255), nullable=True)
-    created_at  = Column(DateTime, default=datetime.utcnow)
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(100), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    decisions = relationship("Decision", back_populates="user")
+    events = relationship("CalendarEvent", back_populates="user")
+    tasks = relationship("Task", back_populates="user")
 
 
 class Decision(Base):
+    """Decision records for audit and history."""
     __tablename__ = "decisions"
-
-    id               = Column(Integer, primary_key=True, index=True)
-    user_id          = Column(Integer, ForeignKey("users.id"), nullable=False)
-    input_message    = Column(Text,    nullable=False)
-    extracted_data   = Column(Text,    nullable=True)   # JSON
-    task_analysis    = Column(Text,    nullable=True)   # JSON
-    calendar_result  = Column(Text,    nullable=True)   # JSON
-    scenarios        = Column(Text,    nullable=True)   # JSON
-    final_decision   = Column(Text,    nullable=True)   # JSON
-    action_taken     = Column(String(100), nullable=True)
-    confidence_score = Column(Float,   nullable=True)
-    created_at       = Column(DateTime, default=datetime.utcnow)
-
-
-class Event(Base):
-    """
-    Local calendar event storage — used when Google Calendar is unavailable.
-    """
-    __tablename__ = "events"
-
-    id             = Column(Integer, primary_key=True, index=True)
-    event_id       = Column(String(255), unique=True, nullable=False)
-    user_id        = Column(String(255), nullable=False, index=True)
-    title          = Column(String(500), nullable=False)
-    start_time     = Column(DateTime, nullable=False)
-    end_time       = Column(DateTime, nullable=False)
-    duration_hours = Column(Float,    nullable=True)
-    created_at     = Column(DateTime, default=datetime.utcnow)
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    input_message = Column(Text, nullable=False)
+    extracted_data = Column(Text)  # JSON string of planner output
+    task_analysis = Column(Text)   # JSON string of task agent output
+    calendar_result = Column(Text) # JSON string of calendar agent output
+    scenarios = Column(Text)       # JSON string of scenario agent output
+    final_decision = Column(Text)  # JSON string of decision engine output
+    action_taken = Column(String(100))
+    confidence_score = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="decisions")
 
 
-class UserToken(Base):
-    """
-    Stores Google OAuth2 tokens per user.
-    token_json is a JSON string: {token, refresh_token, ...}
-    """
-    __tablename__ = "user_tokens"
-
-    id         = Column(Integer, primary_key=True, index=True)
-    user_id    = Column(String(255), unique=True, nullable=False, index=True)
-    token_json = Column(Text, nullable=False)
+class CalendarEvent(Base):
+    """Calendar events managed by MCP tools."""
+    __tablename__ = "calendar_events"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    event_id = Column(String(100), unique=True, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    status = Column(String(50), default="scheduled")  # scheduled, cancelled, rescheduled
+    created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", back_populates="events")
 
 
-# ─────────────────────────────────────────────
-# INITIALIZATION
-# ─────────────────────────────────────────────
+class Task(Base):
+    """Tasks managed by MCP tools."""
+    __tablename__ = "tasks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    task_id = Column(String(100), unique=True, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    priority = Column(Integer, default=5)  # 1-10 scale
+    urgency_score = Column(Float)
+    importance_score = Column(Float)
+    estimated_duration = Column(Float)  # hours
+    deadline = Column(DateTime)
+    status = Column(String(50), default="pending")  # pending, in_progress, completed, cancelled
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", back_populates="tasks")
 
-def init_db() -> None:
-    """Create all tables if they don't exist. Call once at startup."""
+
+def init_db():
+    """Initialize the database by creating all tables."""
     Base.metadata.create_all(bind=engine)
 
 
-# ─────────────────────────────────────────────
-# DEPENDENCY: FastAPI session generator
-# ─────────────────────────────────────────────
-
-def get_db() -> Generator[Session, None, None]:
-    """
-    FastAPI dependency that yields a database session per request.
-    Usage: db: Session = Depends(get_db)
-    """
+def get_db():
+    """Dependency for getting database sessions."""
     db = SessionLocal()
     try:
         yield db
@@ -140,24 +107,11 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-# ─────────────────────────────────────────────
-# HELPER
-# ─────────────────────────────────────────────
-
-def get_or_create_user(db: Session, external_id: str) -> User:
-    """
-    Fetch existing user by external_id, or create one.
-
-    Args:
-        db: Active SQLAlchemy session
-        external_id: String identifier from the frontend (e.g. 'test_user')
-
-    Returns:
-        User ORM object
-    """
-    user = db.query(User).filter(User.external_id == external_id).first()
+def get_or_create_user(db, user_id: str) -> User:
+    """Get existing user or create new one."""
+    user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
-        user = User(external_id=external_id)
+        user = User(user_id=user_id)
         db.add(user)
         db.commit()
         db.refresh(user)
