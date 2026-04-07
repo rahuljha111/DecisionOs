@@ -44,7 +44,11 @@ class MCPTools:
         if not self.google_calendar:
             return False
         if not self._google_authenticated:
-            self._google_authenticated = self.google_calendar.authenticate()
+            self._google_authenticated = self.google_calendar.authenticate(
+                user_id=self.user.user_id,
+                db=self.db,
+                interactive=False,
+            )
         return self._google_authenticated
     
     def create_event(
@@ -74,6 +78,8 @@ class MCPTools:
         # Try Google Calendar first
         if self._ensure_google_auth():
             google_event = self.google_calendar.create_event(
+                user_id=self.user.user_id,
+                db=self.db,
                 title=title,
                 start_time=start_time,
                 end_time=end_time,
@@ -137,6 +143,8 @@ class MCPTools:
         # Try Google Calendar first
         if self._ensure_google_auth():
             result = self.google_calendar.update_event(
+                user_id=self.user.user_id,
+                db=self.db,
                 event_id=event_id,
                 new_start_time=new_start_time,
                 new_end_time=new_end_time
@@ -199,7 +207,7 @@ class MCPTools:
         
         # Try Google Calendar first
         if self._ensure_google_auth():
-            if self.google_calendar.delete_event(event_id):
+            if self.google_calendar.delete_event(user_id=self.user.user_id, db=self.db, event_id=event_id):
                 google_deleted = True
                 source = "google_calendar"
                 logger.info(f"Deleted event from Google Calendar: {event_id}")
@@ -344,6 +352,8 @@ class MCPTools:
         # Try Google Calendar first
         if self._ensure_google_auth():
             google_events = self.google_calendar.get_events(
+                user_id=self.user.user_id,
+                db=self.db,
                 time_min=start_time,
                 time_max=end_time
             )

@@ -2,7 +2,7 @@
 
 ## Required Links
 
-- Cloud Run Deployment Link: PENDING
+- Cloud Run Deployment Link: https://decisionos-837202638935.asia-south1.run.app
 - GitHub Repository Link: https://github.com/rahuljha111/DecisionOs
 - Demo Video Link (<= 3 minutes): PENDING
 - Final Project PPT (PDF <= 5MB): submission/Final_Project_PPT.pdf

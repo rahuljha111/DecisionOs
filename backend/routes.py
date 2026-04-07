@@ -2,22 +2,22 @@
 API Routes for DecisionOS.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from typing import List, Optional
 from datetime import datetime, timedelta
 import json
 from pydantic import BaseModel, Field
 
-from backend.db.database import get_db, Decision, CalendarEvent, Task, get_or_create_user, User
+from backend.db.database import get_db, Decision, CalendarEvent, Task, get_or_create_user, User, GoogleCalendarToken
 from backend.schemas import DecisionRequest, EventCreate, TaskCreate, ExecuteActionRequest
 from ai_engine.orchestrator import stream_decision
 from backend.tools.google_calendar import (
     get_google_calendar_service,
     is_google_calendar_available,
-    CREDENTIALS_FILE,
-    TOKEN_FILE
+    CREDENTIALS_FILE
 )
 
 router = APIRouter()
@@ -307,7 +307,10 @@ async def health_check():
 # ============================================================
 
 @router.get("/calendar/status")
-async def google_calendar_status():
+async def google_calendar_status(
+    user_id: str = Query(default="user_001"),
+    db: Session = Depends(get_db)
+):
     """
     Check Google Calendar integration status.
     
@@ -316,7 +319,12 @@ async def google_calendar_status():
     """
     available = is_google_calendar_available()
     credentials_exist = CREDENTIALS_FILE.exists()
-    token_exists = TOKEN_FILE.exists()
+    token_exists = False
+    try:
+        user = get_or_create_user(db, user_id)
+        token_exists = db.query(GoogleCalendarToken).filter(GoogleCalendarToken.user_id == user.id).first() is not None
+    except OperationalError:
+        db.rollback()
     
     authenticated = False
     error = None
@@ -324,7 +332,7 @@ async def google_calendar_status():
     if available:
         try:
             service = get_google_calendar_service()
-            authenticated = service.authenticate()
+            authenticated = service.authenticate(user_id=user_id, db=db, interactive=False)
             if not authenticated:
                 error = service.error_message
         except Exception as e:
@@ -334,6 +342,7 @@ async def google_calendar_status():
         "google_calendar_available": available,
         "credentials_file_exists": credentials_exist,
         "credentials_file_path": str(CREDENTIALS_FILE),
+        "token_exists": token_exists,
         "token_file_exists": token_exists,
         "authenticated": authenticated,
         "error": error,
@@ -341,15 +350,16 @@ async def google_calendar_status():
             "To enable Google Calendar:\n"
             "1. Go to Google Cloud Console\n"
             "2. Create a project and enable Calendar API\n"
-            "3. Create OAuth 2.0 credentials (Desktop app)\n"
-            f"4. Download credentials.json to: {CREDENTIALS_FILE}\n"
-            "5. Call /api/calendar/auth to authenticate"
+            "3. Create OAuth 2.0 credentials (Desktop app for local, Web app for Cloud Run)\n"
+            f"4. Local option: place credentials.json at: {CREDENTIALS_FILE}\n"
+            "5. Cloud option: set GOOGLE_CREDENTIALS_JSON env var to the OAuth client JSON\n"
+            "6. Call /api/calendar/auth to authenticate"
         )
     }
 
 
 @router.get("/calendar/auth")
-async def google_calendar_authenticate():
+async def google_calendar_authenticate(request: Request, user_id: str = Query(default="user_001")):
     """
     Trigger Google Calendar OAuth authentication.
     Opens browser for user consent.
@@ -360,24 +370,19 @@ async def google_calendar_authenticate():
     if not is_google_calendar_available():
         raise HTTPException(
             status_code=503,
-            detail=f"Google Calendar not available. Place credentials.json at: {CREDENTIALS_FILE}"
+            detail=(
+                "Google Calendar not available. Provide credentials.json at "
+                f"{CREDENTIALS_FILE} or set GOOGLE_CREDENTIALS_JSON env var."
+            )
         )
     
     try:
         service = get_google_calendar_service()
-        success = service.authenticate()
-        
-        if success:
-            return {
-                "success": True,
-                "message": "Google Calendar authenticated successfully!",
-                "token_saved": TOKEN_FILE.exists()
-            }
-        else:
-            raise HTTPException(
-                status_code=401,
-                detail=f"Authentication failed: {service.error_message}"
-            )
+        redirect_uri = str(request.url_for("google_calendar_oauth_callback"))
+        auth_url = service.get_auth_url(redirect_uri, user_id=user_id)
+        if not auth_url:
+            raise HTTPException(status_code=400, detail=f"Failed to start OAuth: {service.error_message}")
+        return RedirectResponse(url=auth_url, status_code=307)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -385,13 +390,41 @@ async def google_calendar_authenticate():
         )
 
 
+@router.get("/calendar/oauth/callback", name="google_calendar_oauth_callback")
+async def google_calendar_oauth_callback(
+    request: Request,
+    code: str = Query(default=""),
+    state: str = Query(default="user_001"),
+    db: Session = Depends(get_db)
+):
+    """OAuth callback endpoint for Google Calendar web flow."""
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing OAuth code")
+
+    service = get_google_calendar_service()
+    redirect_uri = str(request.url_for("google_calendar_oauth_callback"))
+    success = service.complete_web_oauth(code=code, redirect_uri=redirect_uri, user_id=state, db=db)
+
+    if not success:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {service.error_message}")
+
+    # Popup-friendly completion page
+    return HTMLResponse(
+        content=(
+            "<html><body><script>"
+            f"window.opener && window.opener.postMessage({{ type: 'google-calendar-auth', success: true, user_id: '{state}' }}, '*');"
+            "window.close();"
+            "</script><p>Google Calendar connected. You can close this window.</p></body></html>"
+        )
+    )
+
 @router.get("/calendar/auth_url")
-async def google_calendar_auth_url():
+async def google_calendar_auth_url(user_id: str = Query(default="user_001")):
     """
     Return backend URL used by frontend to trigger OAuth flow.
     """
     return {
-        "auth_url": "/api/calendar/auth"
+        "auth_url": f"/api/calendar/auth?user_id={user_id}"
     }
 
 

@@ -49,11 +49,14 @@ async function connectGoogleCalendar() {
   btn.disabled = true;
 
   try {
-      const checkRes = await fetch(`${API_BASE}/calendar/auth_url`).catch(() => null);
+    const userId = document.getElementById("userId").value.trim() || "user_001";
+    const checkRes = await fetch(
+      `${API_BASE}/calendar/auth_url?user_id=${encodeURIComponent(userId)}`,
+    ).catch(() => null);
 
     if (checkRes && checkRes.ok) {
-        const { auth_url } = await checkRes.json();
-        const target = auth_url || `${API_BASE}/calendar/auth`;
+      const { auth_url } = await checkRes.json();
+      const target = auth_url || `${API_BASE}/calendar/auth?user_id=${encodeURIComponent(userId)}`;
 
       // Open OAuth popup
         const popup = window.open(target, "gcal_oauth", "width=500,height=620");
@@ -139,7 +142,8 @@ function setCalendarConnected() {
 
 async function checkCalendarStatus() {
   try {
-    const res = await fetch(`${API_BASE}/calendar/status`);
+    const userId = document.getElementById("userId").value.trim() || "user_001";
+    const res = await fetch(`${API_BASE}/calendar/status?user_id=${encodeURIComponent(userId)}`);
     if (!res.ok) return;
 
     const status = await res.json();
@@ -410,6 +414,36 @@ function escapeHtml(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function generateUserId() {
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `user_${rand}`;
+}
+
+function initUserId() {
+  const userIdInput = document.getElementById("userId");
+  if (!userIdInput) return;
+
+  const saved = localStorage.getItem("decisionos_user_id");
+  const current = userIdInput.value.trim();
+
+  if (saved) {
+    userIdInput.value = saved;
+  } else if (!current || current === "user_001") {
+    const generated = generateUserId();
+    userIdInput.value = generated;
+    localStorage.setItem("decisionos_user_id", generated);
+  } else {
+    localStorage.setItem("decisionos_user_id", current);
+  }
+
+  userIdInput.addEventListener("change", () => {
+    const normalized = userIdInput.value.trim() || generateUserId();
+    userIdInput.value = normalized;
+    localStorage.setItem("decisionos_user_id", normalized);
+    checkCalendarStatus();
+  });
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
@@ -1028,6 +1062,15 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("confirmModal").addEventListener("click", (e) => {
     if (e.target === e.currentTarget) closeModal();
   });
+
+  window.addEventListener("message", (event) => {
+    const data = event.data || {};
+    if (data.type === "google-calendar-auth" && data.success) {
+      fetchCalendarEvents();
+    }
+  });
+
+  initUserId();
 
   // Render initial to-do list
   renderTodos();

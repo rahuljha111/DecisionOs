@@ -33,6 +33,7 @@ class User(Base):
     decisions = relationship("Decision", back_populates="user")
     events = relationship("CalendarEvent", back_populates="user")
     tasks = relationship("Task", back_populates="user")
+    google_token = relationship("GoogleCalendarToken", back_populates="user", uselist=False)
 
 
 class Decision(Base):
@@ -91,6 +92,19 @@ class Task(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     user = relationship("User", back_populates="tasks")
+
+
+class GoogleCalendarToken(Base):
+    """Per-user Google OAuth token storage."""
+    __tablename__ = "google_calendar_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    token_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="google_token")
 
 
 def init_db():
