@@ -350,7 +350,7 @@ async def google_calendar_status(
             "To enable Google Calendar:\n"
             "1. Go to Google Cloud Console\n"
             "2. Create a project and enable Calendar API\n"
-            "3. Create OAuth 2.0 credentials (Desktop app for local, Web app for Cloud Run)\n"
+            "3. Create OAuth 2.0 credentials (Web application)\n"
             f"4. Local option: place credentials.json at: {CREDENTIALS_FILE}\n"
             "5. Cloud option: set GOOGLE_CREDENTIALS_JSON env var to the OAuth client JSON\n"
             "6. Call /api/calendar/auth to authenticate"
@@ -359,7 +359,11 @@ async def google_calendar_status(
 
 
 @router.get("/calendar/auth")
-async def google_calendar_authenticate(request: Request, user_id: str = Query(default="user_001")):
+async def google_calendar_authenticate(
+    request: Request,
+    user_id: str = Query(default="user_001"),
+    db: Session = Depends(get_db)
+):
     """
     Trigger Google Calendar OAuth authentication.
     Opens browser for user consent.
@@ -379,7 +383,7 @@ async def google_calendar_authenticate(request: Request, user_id: str = Query(de
     try:
         service = get_google_calendar_service()
         redirect_uri = str(request.url_for("google_calendar_oauth_callback"))
-        auth_url = service.get_auth_url(redirect_uri, user_id=user_id)
+        auth_url = service.get_auth_url(redirect_uri, user_id=user_id, db=db)
         if not auth_url:
             raise HTTPException(status_code=400, detail=f"Failed to start OAuth: {service.error_message}")
         return RedirectResponse(url=auth_url, status_code=307)
@@ -449,8 +453,8 @@ async def get_google_calendar_events(
     mcp = MCPTools(db, user_id)
     
     now = datetime.now()
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    start = now
+    end = now + timedelta(hours=max(hours, 1))
     
     events, source = mcp.get_events_in_range(start, end)
     

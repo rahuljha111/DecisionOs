@@ -28,12 +28,22 @@
 ### Step 4: Create OAuth Credentials
 1. Go to **APIs & Services** → **Credentials**
 2. Click **+ Create Credentials** → **OAuth client ID**
-3. Application type: **Desktop app**
-4. Name: `DecisionOS Desktop`
-5. Click **Create**
-6. Click **Download JSON**
-7. Rename downloaded file to `credentials.json`
-8. Move it to: `D:\Development\Projects\DecisionOS\credentials.json`
+3. Application type: **Web application**
+4. Name: `DecisionOS Web`
+5. Add **Authorized redirect URIs**:
+   - `http://localhost`
+   - `https://<your-cloud-run-url>/api/calendar/oauth/callback`
+6. Click **Create**
+7. Click **Download JSON**
+8. Rename downloaded file to `credentials.json`
+9. Move it to: `D:\Development\Projects\AI\DecisionOs\credentials.json`
+
+### Step 4B: Cloud Run Secret Setup (Production)
+1. Open the downloaded OAuth JSON file
+2. Base64-encode it (or keep as plain JSON)
+3. Set Cloud Run environment variable:
+   - `GOOGLE_CREDENTIALS_JSON=<json-or-base64-json>`
+4. Redeploy the service
 
 ### Step 5: Authenticate
 1. Start the DecisionOS server
@@ -55,10 +65,16 @@ Once authenticated, DecisionOS will:
 - Make sure you added your email as a test user in OAuth consent screen
 
 ### "Credentials not found"
-- Verify `credentials.json` is at: `D:\Development\Projects\DecisionOS\credentials.json`
+- Verify `credentials.json` is at: `D:\Development\Projects\AI\DecisionOs\credentials.json`
+- For Cloud Run, verify `GOOGLE_CREDENTIALS_JSON` is configured on the service
 
 ### Token expired
 - Delete `token.json` and re-authenticate via `/api/calendar/auth`
+
+### `redirect_uri_mismatch`
+- Ensure both local and production callback URLs are listed in the OAuth client:
+   - `http://localhost`
+   - `https://<your-cloud-run-url>/api/calendar/oauth/callback`
 
 ## API Endpoints
 
@@ -67,3 +83,19 @@ Once authenticated, DecisionOS will:
 | `GET /api/calendar/status` | Check integration status |
 | `GET /api/calendar/auth` | Trigger OAuth flow |
 | `GET /api/calendar/events` | Get events (Google or DB) |
+
+## Production Smoke Test
+
+Run:
+
+```bash
+.venv\Scripts\python.exe smoke_test_calendar_prod.py
+```
+
+Strict mode (must already be authenticated):
+
+```bash
+set DECISIONOS_REQUIRE_AUTH=1
+set DECISIONOS_USER_ID=your_user_id
+.venv\Scripts\python.exe smoke_test_calendar_prod.py
+```

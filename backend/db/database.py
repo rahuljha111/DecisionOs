@@ -4,6 +4,7 @@ PostgreSQL database with real MCP integration.
 """
 
 import os
+import uuid
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
@@ -107,6 +108,20 @@ class GoogleCalendarToken(Base):
     user = relationship("User", back_populates="google_token")
 
 
+class GoogleOAuthState(Base):
+    """Temporary OAuth state for preserving PKCE verifier across redirects."""
+    __tablename__ = "google_oauth_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    state_key = Column(String(128), unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    code_verifier = Column(String(256), nullable=False)
+    redirect_uri = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
 def init_db():
     """Initialize the database by creating all tables."""
     Base.metadata.create_all(bind=engine)
@@ -130,3 +145,30 @@ def get_or_create_user(db, user_id: str) -> User:
         db.commit()
         db.refresh(user)
     return user
+
+
+def create_oauth_state(db, user_id: str, code_verifier: str, redirect_uri: str, state_key: str | None = None) -> str:
+    """Create a temporary OAuth state record and return the state key."""
+    user = get_or_create_user(db, user_id)
+    if state_key is None:
+        state_key = uuid.uuid4().hex
+    state_row = GoogleOAuthState(
+        state_key=state_key,
+        user_id=user.id,
+        code_verifier=code_verifier,
+        redirect_uri=redirect_uri,
+    )
+    db.add(state_row)
+    db.commit()
+    return state_key
+
+
+def load_oauth_state(db, state_key: str) -> GoogleOAuthState | None:
+    """Load a temporary OAuth state record by key."""
+    return db.query(GoogleOAuthState).filter(GoogleOAuthState.state_key == state_key).first()
+
+
+def delete_oauth_state(db, state_key: str) -> None:
+    """Delete a temporary OAuth state record after use."""
+    db.query(GoogleOAuthState).filter(GoogleOAuthState.state_key == state_key).delete()
+    db.commit()

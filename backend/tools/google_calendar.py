@@ -9,6 +9,7 @@ import os
 import json
 import base64
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from pathlib import Path
@@ -16,7 +17,13 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 
-from backend.db.database import get_or_create_user, GoogleCalendarToken
+from backend.db.database import (
+    get_or_create_user,
+    GoogleCalendarToken,
+    create_oauth_state,
+    load_oauth_state,
+    delete_oauth_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +97,7 @@ class GoogleCalendarService:
         self.authenticated = False
         self.error_message = None
         self._services_by_user: Dict[str, Any] = {}
+        self._pending_auth: Dict[str, Dict[str, str]] = {}
         
     def _load_token_from_db(self, db: Session, user_id: str) -> Optional[str]:
         try:
@@ -208,7 +216,7 @@ class GoogleCalendarService:
             logger.error(self.error_message)
             return False
 
-    def get_auth_url(self, redirect_uri: str, user_id: str) -> Optional[str]:
+    def get_auth_url(self, redirect_uri: str, user_id: str, db: Optional[Session] = None) -> Optional[str]:
         """Generate web OAuth URL for browser-based authentication."""
         if not GOOGLE_API_AVAILABLE:
             self.error_message = "Google API libraries not installed"
@@ -221,12 +229,22 @@ class GoogleCalendarService:
 
         try:
             flow = InstalledAppFlow.from_client_config(client_config, SCOPES, redirect_uri=redirect_uri)
+            state_key = user_id
+            if db is not None:
+                state_key = uuid.uuid4().hex
             auth_url, _state = flow.authorization_url(
                 access_type="offline",
                 include_granted_scopes="true",
                 prompt="consent",
-                state=user_id,
+                state=state_key,
             )
+            if db is not None:
+                create_oauth_state(db, user_id, flow.code_verifier, redirect_uri, state_key=state_key)
+                self._pending_auth[state_key] = {
+                    "user_id": user_id,
+                    "code_verifier": flow.code_verifier,
+                    "redirect_uri": redirect_uri,
+                }
             return auth_url
         except Exception as e:
             self.error_message = f"Failed to build auth URL: {e}"
@@ -245,18 +263,34 @@ class GoogleCalendarService:
 
         try:
             flow = InstalledAppFlow.from_client_config(client_config, SCOPES, redirect_uri=redirect_uri)
+            verifier = None
+            actual_user_id = user_id
+            if db is not None:
+                state_key = user_id
+                pending = load_oauth_state(db, state_key)
+                if pending:
+                    verifier = pending.code_verifier
+                    actual_user_id = pending.user.user_id
+                    delete_oauth_state(db, state_key)
+            if verifier is None:
+                pending_auth = self._pending_auth.get(user_id)
+                if pending_auth:
+                    verifier = pending_auth.get("code_verifier")
+                    actual_user_id = pending_auth.get("user_id", actual_user_id)
+            if verifier:
+                flow.code_verifier = verifier
             flow.fetch_token(code=code)
             creds = flow.credentials
 
             if db is not None:
-                self._save_token_to_db(db, user_id, creds.to_json())
+                self._save_token_to_db(db, actual_user_id, creds.to_json())
             else:
                 token_file = _token_file_path()
                 token_file.write_text(creds.to_json(), encoding="utf-8")
 
             service = build('calendar', 'v3', credentials=creds)
             self.service = service
-            self._services_by_user[user_id] = service
+            self._services_by_user[actual_user_id] = service
             self.authenticated = True
             self.error_message = None
             return True

@@ -17,6 +17,7 @@ A production-ready multi-agent AI decision engine that simulates scenarios befor
 - [Agent System](#-agent-system)
 - [MCP Tools](#-mcp-tools)
 - [Setup Instructions](#-setup-instructions)
+- [Production Hardening](#-production-hardening)
 - [How to Run](#-how-to-run)
 - [Demo Example](#-demo-example)
 - [API Reference](#-api-reference)
@@ -198,6 +199,30 @@ MCP (Model Context Protocol) Tools execute real-world actions:
 
 ## 🚀 Setup Instructions
 
+## ✅ Production Hardening
+
+The project now includes production-safe Google Calendar integration for Cloud Run and multi-user scenarios:
+
+- Per-user OAuth token storage in database (instead of shared local token file)
+- PKCE-safe OAuth callback handling across redirect round-trips
+- Web OAuth client flow aligned for Cloud Run callback URLs
+- Calendar event fetch endpoint honors requested time window (`hours`)
+- Production smoke test script for health + calendar status + events response
+
+Quick validation command:
+
+```bash
+.venv\Scripts\python.exe smoke_test_calendar_prod.py
+```
+
+Strict mode (requires authenticated test user):
+
+```bash
+set DECISIONOS_REQUIRE_AUTH=1
+set DECISIONOS_USER_ID=your_user_id
+.venv\Scripts\python.exe smoke_test_calendar_prod.py
+```
+
 ## ✅ Production Regression Check
 
 Run the decision regression suite (15 user scenarios + extra edge cases):
@@ -250,13 +275,23 @@ See [GOOGLE_CALENDAR_SETUP.md](GOOGLE_CALENDAR_SETUP.md) for detailed instructio
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project
 3. Enable Google Calendar API
-4. Create OAuth 2.0 credentials (Desktop app)
+4. Create OAuth 2.0 credentials (Web application)
 5. Download `credentials.json` to project root
 6. Run the server and visit `/api/calendar/auth`
 7. Authenticate in browser
 8. `token.json` will be created automatically
 
-### 5. Initialize Database
+### 5. Cloud Run Configuration (Production)
+
+For Cloud Run, do not rely on local `credentials.json` inside the container image.
+
+1. Create OAuth credentials as **Web application**
+2. Add redirect URI:
+    - `https://<your-cloud-run-url>/api/calendar/oauth/callback`
+3. Set `GOOGLE_CREDENTIALS_JSON` environment variable on the Cloud Run service
+4. Deploy and authenticate at least one test user through `/api/calendar/auth?user_id=<id>`
+
+### 6. Initialize Database
 
 The database is automatically initialized when you start the server.
 
@@ -282,6 +317,16 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 4
 4. Watch the agent pipeline process
 5. Review the decision and scenarios
 6. Execute actions if desired
+
+### Verify Calendar Integration
+
+```bash
+# Calendar status for a user
+curl "http://127.0.0.1:8000/api/calendar/status?user_id=user_001"
+
+# Calendar events for next 24 hours
+curl "http://127.0.0.1:8000/api/calendar/events?user_id=user_001&hours=24"
+```
 
 ---
 
