@@ -38,7 +38,7 @@ async function connectGoogleCalendar() {
   const label = document.getElementById("connectCalBtnLabel");
 
   if (calendarConnected) {
-    // Disconnect
+    // Disconnect (Simulated: just clear local state)
     calendarConnected = false;
     todayMeetings = [];
     btn.classList.remove("connected");
@@ -52,29 +52,21 @@ async function connectGoogleCalendar() {
   btn.disabled = true;
 
   try {
-    // Try the real backend OAuth endpoint first
-    const checkRes = await fetch(`${API_BASE}/calendar/auth_url`).catch(
-      () => null,
-    );
+    // Call the backend OAuth endpoint 
+    // This will open a browser on the server machine for authentication
+    const res = await fetch(`${API_BASE}/calendar/auth`);
 
-    if (checkRes && checkRes.ok) {
-      const { auth_url } = await checkRes.json();
-
-      // Open OAuth popup
-      const popup = window.open(auth_url, "gcal_oauth", "width=500,height=620");
-
-      // Poll for popup close & then fetch events
-      const pollTimer = setInterval(async () => {
-        if (!popup || popup.closed) {
-          clearInterval(pollTimer);
-          await fetchCalendarEvents();
-        }
-      }, 500);
+    if (res.ok) {
+        const data = await res.json();
+        console.log("Auth success:", data);
+        await fetchCalendarEvents();
     } else {
-      // Backend not available → simulate demo data
+      // Backend error or not available → simulate demo data
+      console.warn("Backend auth failed, falling back to simulation");
       await simulateCalendarConnection();
     }
   } catch (err) {
+    console.error("Connection error:", err);
     await simulateCalendarConnection();
   } finally {
     btn.disabled = false;
@@ -90,20 +82,33 @@ async function fetchCalendarEvents() {
 
   try {
     const userId = document.getElementById("userId").value.trim() || "user_001";
+    // We can also specify hours=24 to get today's meetings
     const res = await fetch(
-      `${API_BASE}/calendar/events?user_id=${encodeURIComponent(userId)}`,
+      `${API_BASE}/calendar/events?user_id=${encodeURIComponent(userId)}&hours=24`,
     );
 
     if (!res.ok) throw new Error("Failed to fetch events");
 
     const data = await res.json();
-    todayMeetings = (data.events || []).map((e) => ({
-      time: e.start_time || e.time || "",
-      title: e.title || e.summary || "Meeting",
-    }));
+    todayMeetings = (data.events || []).map((e) => {
+        // Format the ISO time to something readable like "10:00 AM"
+        let displayTime = "";
+        try {
+            const date = new Date(e.start_time);
+            displayTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch (err) {
+            displayTime = e.start_time || e.time || "";
+        }
+
+        return {
+            time: displayTime,
+            title: e.title || e.summary || "Meeting",
+        };
+    });
 
     setCalendarConnected();
   } catch (err) {
+    console.error("Fetch events error:", err);
     // Fall back to demo on any fetch error
     await simulateCalendarConnection();
   }
@@ -966,4 +971,22 @@ document.addEventListener("DOMContentLoaded", () => {
   // Render initial to-do list
   renderTodos();
   renderMeetings();
+
+  // Check if calendar is already connected
+  checkCalendarStatus();
 });
+
+async function checkCalendarStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/calendar/status`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.authenticated) {
+        console.log("Calendar already authenticated");
+        await fetchCalendarEvents();
+      }
+    }
+  } catch (err) {
+    console.error("Error checking calendar status:", err);
+  }
+}
