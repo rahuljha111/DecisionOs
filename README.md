@@ -9,7 +9,22 @@ A production-ready multi-agent AI decision engine that simulates scenarios befor
 
 ---
 
-## 📋 Table of Contents
+## ⚡ Quick Start (Production)
+
+**No setup needed! The app is live at:**
+```
+🌐 https://decisionos-837202638935.asia-south1.run.app
+```
+
+1. Open the URL in your browser
+2. Enter tasks (e.g., "gym at 6pm", "interview at 7pm", "complete report")
+3. Click **"Get Decision"**
+4. View multi-agent analysis + Vertex AI ranking
+5. Execute actions if desired
+
+**No account required for demo!** (Optional OAuth for real calendar integration)
+
+---
 
 - [What is DecisionOS?](#-what-is-decisionos)
 - [Key Features](#-key-features)
@@ -65,408 +80,624 @@ DecisionOS is a **multi-agent AI system** that helps you make better decisions b
 ## 🏗 Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         USER INPUT                               │
-│              "I have exam at 7pm and gym at 6pm"                │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                       FRONTEND (HTML/JS)                              │
+│            Multi-Agent Trace UI + Task Input                         │
+│        https://decisionos-837202638935.asia-south1.run.app          │
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ User submits: tasks + calendar context
+┌──────────────────────────────────────────────────────────────────────┐
+│                         FASTAPI BACKEND                               │
+│           POST /api/prioritize_tasks (Primary Entry Point)            │
+│              Running on: Google Cloud Run (asia-south1)               │
+└──────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         FASTAPI                                  │
-│                    POST /api/decide                              │
-│                   (SSE Streaming)                                │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                   ORCHESTRATOR (Backend)                              │
+│     Coordinates multi-agent pipeline with Vertex AI decision          │
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│   PLANNER AGENT  │ │   TASK AGENT     │ │  CALENDAR AGENT  │
+│  (Analyze input) │ │ (Score urgency)  │ │ (Fetch Google    │
+│                  │ │                  │ │  Calendar events)│
+│ Extract task     │ │ Urgency: 0-10    │ │                  │
+│ type & context   │ │ Importance: 0-10 │ │ MCP/DB fallback  │
+└──────────────────┘ └──────────────────┘ └──────────────────┘
+         │                    │                    │
+         └────────────────────┼────────────────────┘
                               │
                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      ORCHESTRATOR                                │
-│              Coordinates the agent pipeline                      │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ▼                     ▼                     ▼
-┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-│   PLANNER     │   │    TASK       │   │   CALENDAR    │
-│    AGENT      │   │    AGENT      │   │    AGENT      │
-│  (LLM/Rules)  │   │  (Rule-based) │   │ (Rule-based)  │
-│               │   │               │   │               │
-│ Extract task  │   │ Score urgency │   │ Check Google  │
-│ and context   │   │ & importance  │   │ Calendar      │
-└───────────────┘   └───────────────┘   └───────────────┘
-        │                     │                     │
-        └─────────────────────┼─────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                   SCENARIO SIMULATOR AGENT                            │
+│            Generate 3 decision options with scores (0-100)            │
+└──────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-                    ┌───────────────┐
-                    │   SCENARIO    │
-                    │    AGENT      │
-                    │    (Hybrid)   │
-                    │               │
-                    │ Simulate 3    │
-                    │ options with  │
-                    │ scores        │
-                    └───────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                  DECISION ENGINE (Vertex AI)                          │
+│        Gemini 2.5-Flash LLM: Rank tasks + return final decision       │
+│   Returns: prioritized_tasks[], decision_text, reasoning              │
+└──────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-                    ┌───────────────┐
-                    │   DECISION    │
-                    │    ENGINE     │
-                    │   (LLM/Rules) │
-                    │               │
-                    │ Select best   │
-                    │ option        │
-                    └───────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                    MCP TOOLS (Execution Layer)                        │
+│  POST /api/execute_action (Calendar: create, reschedule, cancel)     │
+└──────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-                    ┌───────────────┐
-                    │   MCP TOOLS   │
-                    │               │
-                    │ Execute:      │
-                    │ - Cancel      │
-                    │ - Reschedule  │
-                    │ - Create      │
-                    └───────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        DATABASE                                  │
-│              PostgreSQL / SQLite + Google Calendar               │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                   PERSISTENT DATA LAYER                               │
+│  PostgreSQL: Users, tokens, decisions, calendar events, tasks        │
+│  Google Calendar API: Real-time calendar state                        │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 🤖 Agent System
 
+The system uses a 5-step multi-agent pipeline that's **visible in the UI**:
+
 ### 1. 📋 Planner Agent
-**Purpose:** Extract structured information from natural language input.
+**Input:** Natural language task description  
+**Output:** Structured task analysis (type, urgency keywords, constraints)
 
-- Identifies task type (exam, deadline, meeting)
-- Extracts time constraints
-- Detects urgency keywords
-- Falls back to rule-based parsing if LLM fails
+- Identifies task type (appointment, deadline, event, flexible activity)
+- Extracts time windows and constraints
+- Detects urgency keywords ("urgent", "asap", "deadline", "critical")
+- Parses calendar event conflicts
 
-### 2. 📊 Task Agent (Rule-based)
-**Purpose:** Analyze task priority and urgency.
+### 2. 📊 Task Analyzer Agent  
+**Input:** Structured task from Planner  
+**Output:** Urgency score (0-10), Importance score (0-10)
 
-- Calculates urgency score (0-10)
-- Calculates importance score (0-10)
-- Determines overall priority
-- Uses system defaults for duration estimates
+- Calculates urgency: How soon must it be done?
+- Calculates importance: What's the impact if skipped?
+- Combined score influences final decision
 
-### 3. 📅 Calendar Agent (Rule-based)
-**Purpose:** Check calendar for conflicts.
+### 3. 📅 Calendar Agent
+**Input:** User ID, task details  
+**Output:** Calendar events, conflicts, constraints
 
-- Fetches real events from Google Calendar
+- Fetches real Google Calendar events (if authenticated)
+- Falls back to PostgreSQL event database
 - Detects time overlaps with 30-minute buffer
-- Classifies event priority (high/medium/low)
-- Generates alternatives (attend, skip, reschedule)
+- Classifies events: fixed (appointments) vs flexible (tasks)
 
-### 4. 🎲 Scenario Agent (Hybrid)
-**Purpose:** Simulate decision options with scores.
+### 4. 🎲 Scenario Simulator Agent
+**Input:** Tasks + calendar context  
+**Output:** 3 decision scenarios with scores (0-100)
 
-- Generates exactly 3 scenarios
-- Scores each option (0-100)
-- Applies hard penalties for priority conflicts
-- Uses LLM for rich descriptions, rules for scoring
+- Option 1: Recommended scenario (highest score)
+- Option 2: Alternative scenario  
+- Option 3: Rejected scenario (lowest score)
+- Each scored based on priority conflicts and time constraints
 
-### 5. 🧠 Decision Engine (Hybrid)
-**Purpose:** Synthesize final decision.
+### 5. 🧠 Decision Engine (Vertex AI)
+**Input:** All task + scenario data  
+**Output:** Final prioritized task list + reasoning
 
-- Selects highest scoring option
+- Model: `google/gemini-2.5-flash` (Vertex AI, production)
+- Selects highest-scoring scenario
 - Generates strong, actionable language
-- Validates against priority rules
-- Returns executable actions
+- Returns in format: `{prioritized_tasks, decision, reason}`
 
 ---
 
 ## 🔧 MCP Tools
 
-MCP (Model Context Protocol) Tools execute real-world actions:
+MCP (Model Context Protocol) Tools execute real-world calendar actions after decisions are made:
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `create_event` | Create calendar event | title, start_time, end_time, description |
-| `reschedule_event` | Move event to new time | event_id, new_start_time, new_end_time |
-| `cancel_event` | Cancel/delete event | event_id |
-| `add_task` | Add a task to database | title, description, priority, deadline |
+| Tool | Endpoint | Parameters | Purpose |
+|------|----------|------------|---------|
+| `create_event` | POST /api/execute_action | title, start_time, end_time, description | Create new calendar event |
+| `reschedule_event` | POST /api/execute_action | event_id, new_start_time, new_end_time | Move event to different time |
+| `cancel_event` | POST /api/execute_action | event_id | Delete/cancel event |
+| `add_task` | POST /api/execute_action | title, description, priority, deadline | Add task to database |
 
-**Integration:**
-- Primary: Google Calendar API
-- Fallback: PostgreSQL database
-- Sync: Events are synced between both
+**Implementation:**
+- **Primary:** Google Calendar API (real-time when authenticated)
+- **Fallback:** PostgreSQL database (local storage)
+- **Sync:** Events synced between Google and DB on each request
+- **Execution:** Called after user confirms decision + clicks action button
+
+### Example Tool Execution
+
+```bash
+# Cancel a calendar event after decision
+curl -X POST "https://decisionos-837202638935.asia-south1.run.app/api/execute_action" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user_001",
+    "action_type": "cancel_event",
+    "event_id": "google_event_abc123",
+    "params": {}
+  }'
+```
 
 ---
 
-## 🚀 Setup Instructions
+## 🚀 Deployment
 
-## ✅ Production Hardening
+### Live Production Instance
 
-The project now includes production-safe Google Calendar integration for Cloud Run and multi-user scenarios:
+**Application URL:** `https://decisionos-837202638935.asia-south1.run.app`
 
-- Per-user OAuth token storage in database (instead of shared local token file)
-- PKCE-safe OAuth callback handling across redirect round-trips
-- Web OAuth client flow aligned for Cloud Run callback URLs
-- Calendar event fetch endpoint honors requested time window (`hours`)
-- Production smoke test script for health + calendar status + events response
+**Deployment Details:**
+- Platform: Google Cloud Run
+- Region: asia-south1  
+- Timeout: 3600 seconds
+- Revision: decisionos-00033-wmd
+- Status: 100% traffic (production-ready)
+- Auto-scaling: Enabled
 
-Quick validation command:
+**Make a Request to Production API:**
 
 ```bash
-.venv\Scripts\python.exe smoke_test_calendar_prod.py
+# Quick test
+curl -X POST "https://decisionos-837202638935.asia-south1.run.app/api/health"
+
+# Prioritize tasks (main endpoint)
+curl -X POST "https://decisionos-837202638935.asia-south1.run.app/api/prioritize_tasks" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"demo","tasks":["task1","task2"]}'
 ```
 
-Strict mode (requires authenticated test user):
+### Deploy Locally or to Your Cloud
 
+#### Local Deployment
 ```bash
-set DECISIONOS_REQUIRE_AUTH=1
-set DECISIONOS_USER_ID=your_user_id
-.venv\Scripts\python.exe smoke_test_calendar_prod.py
-```
-
-## ✅ Production Regression Check
-
-Run the decision regression suite (15 user scenarios + extra edge cases):
-
-```bash
-.venv\Scripts\python.exe backend/tools/decision_regression_suite.py
-```
-
-This validates that decisions are specific, actionable, and free from generic fallback phrasing.
-
-### Prerequisites
-
-- Python 3.10+
-- PostgreSQL (recommended) or SQLite
-- Google Cloud account (for Calendar integration)
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/yourusername/decisionos.git
-cd decisionos
-```
-
-### 2. Install Dependencies
-
-```bash
+# Requirements  
 pip install -r requirements.txt
+
+# Set environment variables
+export VERTEX_AI_PROJECT=your-gcp-project
+export VERTEX_AI_MODEL=google/gemini-2.5-flash
+export GEMINI_API_KEY=your-api-key
+
+# Start server
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# Access
+open http://localhost:8000
 ```
 
-### 3. Set Environment Variables
-
-Create a `.env` file or set these variables:
-
+#### Cloud Run Deployment
 ```bash
-# Required
-export GEMINI_API_KEY="your-gemini-api-key"
+# Prerequisites: gcloud CLI, GCP project setup
 
-# Database (PostgreSQL recommended)
-export DATABASE_URL="postgresql://postgres:password@localhost:5432/decisionos"
+# Deploy
+gcloud run deploy decisionos \
+  --source . \
+  --region asia-south1 \
+  --project your-project-id \
+  --timeout 3600 \
+  --set-env-vars VERTEX_AI_PROJECT=your-project-id,\
+VERTEX_AI_MODEL=google/gemini-2.5-flash,\
+VERTEX_AI_LOCATION=us-central1
 
-# Or use SQLite (default)
-# No config needed - uses decisionos.db
+# Verify
+gcloud run services describe decisionos --region asia-south1
+
+# View logs
+gcloud run services logs read decisionos --region asia-south1 --limit 50
 ```
-
-### 4. Google Calendar Setup (Optional but Recommended)
-
-See [GOOGLE_CALENDAR_SETUP.md](GOOGLE_CALENDAR_SETUP.md) for detailed instructions.
-
-**Quick Steps:**
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project
-3. Enable Google Calendar API
-4. Create OAuth 2.0 credentials (Web application)
-5. Download `credentials.json` to project root
-6. Run the server and visit `/api/calendar/auth`
-7. Authenticate in browser
-8. `token.json` will be created automatically
-
-### 5. Cloud Run Configuration (Production)
-
-For Cloud Run, do not rely on local `credentials.json` inside the container image.
-
-1. Create OAuth credentials as **Web application**
-2. Add redirect URI:
-    - `https://<your-cloud-run-url>/api/calendar/oauth/callback`
-3. Set `GOOGLE_CREDENTIALS_JSON` environment variable on the Cloud Run service
-4. Deploy and authenticate at least one test user through `/api/calendar/auth?user_id=<id>`
-
-### 6. Initialize Database
-
-The database is automatically initialized when you start the server.
 
 ---
 
 ## ▶️ How to Run
 
-### Start the Backend Server
+### Live Production Deploy
+Access the live instance:
+
+```
+🌐 Frontend: https://decisionos-837202638935.asia-south1.run.app
+📌 API Base: https://decisionos-837202638935.asia-south1.run.app/api
+```
+
+The application is deployed on **Google Cloud Run** (asia-south1 region) with automatic scaling and 3600s timeout.
+
+### Start the Backend Server Locally
 
 ```bash
-# Development
+# Development with auto-reload
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 
-# Production
+# Production (local)
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 ### Access the Application
 
+#### Local Testing
 1. Open browser: `http://localhost:8000`
-2. Enter your situation in the text box
+2. Enter your tasks in the text box
 3. Click "Get Decision"
-4. Watch the agent pipeline process
-5. Review the decision and scenarios
-6. Execute actions if desired
+4. View the multi-agent trace (Planner → Task → Calendar → Scenario → Decision)
+5. See Vertex AI prioritization result
 
-### Verify Calendar Integration
+#### Production Testing
+1. Open: `https://decisionos-837202638935.asia-south1.run.app`
+2. Same workflow as local (fully functional with live Google Calendar integration)
+
+### Verify Calendar Integration (Local)
 
 ```bash
-# Calendar status for a user
-curl "http://127.0.0.1:8000/api/calendar/status?user_id=user_001"
+# Calendar status (OAuth check)
+curl "http://127.0.0.1:8000/api/calendar/status?user_id=test_user"
 
 # Calendar events for next 24 hours
-curl "http://127.0.0.1:8000/api/calendar/events?user_id=user_001&hours=24"
+curl "http://127.0.0.1:8000/api/calendar/events?user_id=test_user&hours=24"
+
+# Health check
+curl "http://127.0.0.1:8000/api/health"
 ```
 
 ---
 
 ## 🎮 Demo Example
 
-### Input
+### Scenario
+A user has three items on their plate:
+- **gym at 6:00 PM** - flexible, health activity
+- **doctor appointment at 9:30 PM** - fixed-time, high priority
+- **manager meeting at 10:30 PM** - fixed-time, work commitment
+- **project report** - flexible deadline
+
+### What Happens End-to-End
+
+1. **Frontend** collects tasks and auto-injects calendar events
+2. **POST /api/prioritize_tasks** is called with all items
+3. **Backend Orchestrator** activates:
+   - **Planner Agent** detects: doctor (critical), meeting (important), gym (flexible), report (important)
+   - **Task Agent** scores: doctor health (10/10), meeting work (9/10), report work (8/10), gym (5/10)
+   - **Calendar Agent** fetches real Google Calendar, finds doctor and meeting scheduled
+   - **Scenario Agent** simulates 3 options with scores
+4. **Vertex AI (Gemini 2.5-Flash)** selects final priority order
+5. **Decision rendered** in UI with reasoning
+
+### API Request (Direct)
+
+```bash
+curl -X POST "https://decisionos-837202638935.asia-south1.run.app/api/prioritize_tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user_001",
+    "tasks": [
+        "gym at 6:00 PM",
+        "doctor appointment at 9:30 PM",
+        "manager meeting at 10:30 PM",
+        "complete project report"
+    ]
+  }'
 ```
-I have exam at 7pm and gym at 6pm. What should I do?
+
+### AI Response
+
+```json
+{
+    "prioritized_tasks": [
+        "Attend doctor appointment at 9:30 PM",
+        "Attend manager meeting at 10:30 PM",
+        "complete project report",
+        "gym at 6:00 PM"
+    ],
+    "decision": "Do Attend doctor appointment at 9:30 PM first, then Attend manager meeting at 10:30 PM.",
+    "reason": "Fixed-time appointments are highest priority and must be attended at their scheduled times. The doctor appointment is earlier than the manager meeting. Gym is flexible and can be rescheduled if needed. Project report has a flexible deadline."
+}
 ```
 
-### What Happens
+### Frontend Output Display
 
-1. **Planner** detects: exam (high priority), gym (low priority)
-2. **Task Agent** scores: urgency 8/10, importance 10/10
-3. **Calendar Agent** finds conflict: gym 6-7pm overlaps with exam prep
-4. **Scenario Agent** simulates:
-   - Skip gym: **90/100** ✨
-   - Reschedule gym: 75/100
-   - Attend gym: 14/100
-5. **Decision Engine** chooses: Skip gym
-
-### Output
 ```
-🎯 Skip the gym and focus on your exam preparation
+📊 Multi-Agent Trace:
 
-Confidence: 90%
+▸ Planner: Identified 4 items (2 fixed appointments, 2 flexible)
+  └─ Doctor appointment: CRITICAL (health)
+  └─ Manager meeting: HIGH (commitment)
+  └─ Project report: MEDIUM (work)
+  └─ Gym: LOW (wellness)
 
-Why this decision?
-Skipping gym is recommended (score: 90/100). 
-Urgency is high (8/10). Time conflict detected.
-Focus on task to meet deadline.
+▸ Task Analyzer: Scoring urgency and importance
+  └─ Doctor: 97/100 (high priority + time constraint)  
+  └─ Manager: 89/100 (work commitment + time constraint)
+  └─ Report: 76/100 (work task + flexible)
+  └─ Gym: 45/100 (wellness + flexible)
 
-Next Steps:
-1. Cancel or decline gym
-2. Start working on your task immediately
-3. Complete before the deadline
+▸ Calendar Agent: Checking calendar conflicts
+  └─ Found 2 calendar events (doctor, meeting)
+  └─ No direct conflicts
+  └─ All times confirmed
 
-[❌ Cancel Gym Event]  [📅 Reschedule Gym]
+▸ Scenario Simulator: Evaluating options
+  └─ Option 1: Do doctor, then meeting (Score: 96)
+  └─ Option 2: Skip doctor (Score: 15) ❌ NOT RECOMMENDED
+  └─ Option 3: Skip meeting (Score: 42) ❌ NOT RECOMMENDED
+
+▸ Decision Engine (Vertex AI):
+  ✅ RECOMMENDATION: Do Attend doctor appointment at 9:30 PM first, then Attend manager meeting at 10:30 PM.
+  
+  REASON: Fixed-time appointments are highest priority and must be attended at their scheduled times. The doctor appointment is earlier than the manager meeting. Gym is flexible and can be rescheduled if needed. Project report has a flexible deadline.
 ```
+
+### Next Steps (Optional)
+
+User can execute actions via the UI:
+- **[❌ Cancel Gym]** - Remove from calendar
+- **[⏰ Reschedule Gym]** - Move to tomorrow
+- **[✅ Mark Completed]** - Complete report, then gym
 
 ---
 
 ## 📡 API Reference
 
-### Main Endpoints
+### Production Endpoint
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/decide` | Make a decision (SSE stream) |
-| POST | `/api/prioritize` | Build a practical day plan from tasks + events |
-| POST | `/api/execute_action` | Execute an action |
-| GET | `/api/decisions/{user_id}` | Get decision history |
-| GET | `/api/calendar/events` | Get calendar events |
-| GET | `/api/calendar/status` | Check calendar integration |
-| GET | `/api/health` | Health check |
-| POST | `/api/prioritize_tasks` | Vertex-backed task prioritization (used by latest frontend flow) |
-
-### Decision Request
-
-```json
-POST /api/decide
-{
-    "user_id": "user_001",
-    "message": "I have exam at 7pm and gym at 6pm"
-}
+**Base URL (Production):**
+```
+https://decisionos-837202638935.asia-south1.run.app
 ```
 
-### Execute Action
-
-```json
-POST /api/execute_action
-{
-    "user_id": "user_001",
-    "action_type": "cancel_event",
-    "event_id": "abc123",
-    "params": {}
-}
+**Base URL (Local Development):**
+```
+http://localhost:8000
 ```
 
-### Task Prioritization Demo
+### Primary Endpoints
 
-Use this endpoint when you want a simple Postman request that accepts only an array of tasks. Prioritization and decision text are generated by Gemini for each new input (via Vertex AI in production), so output can vary.
+| Method | Endpoint | Purpose | Response |
+|--------|----------|---------|----------|
+| **POST** | `/api/prioritize_tasks` | **Main Decision Endpoint** - Vertex AI prioritizes tasks with calendar context | `{prioritized_tasks: [], decision: string, reason: string}` |
+| GET | `/api/health` | Service health check | `{status: "healthy", timestamp: ISO}` |
+| GET | `/api/calendar/status?user_id=<id>` | Check OAuth status for user | `{authenticated: bool, has_credentials: bool}` |
+| GET | `/api/calendar/events?user_id=<id>&hours=24` | Get upcoming calendar events | `{events: [{title, start_time, end_time}], fetched_at: ISO}` |
+| GET | `/api/calendar/auth?user_id=<id>` | Initiate OAuth flow | Redirect to Google consent screen |
+| GET | `/api/calendar/oauth/callback` | OAuth callback (auto-handled) | Session + token stored in database |
 
-In the latest frontend flow, multi-agent steps are shown in sequence (Planner, Task Analyzer, Calendar, Scenario Simulator), and the final decision is returned from this same Vertex-backed endpoint.
+### Supporting Endpoints (Auxiliary)
 
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/decide` | Legacy SSE streaming endpoint (use /prioritize_tasks instead) |
+| POST | `/api/prioritize` | Build day plan from tasks + meetings (legacy) |
+| POST | `/api/execute_action` | Execute calendar actions (create/reschedule/cancel event) |
+| GET | `/api/decisions/{user_id}` | Get decision history for user |
+| GET | `/api/decision/{decision_id}` | Get specific decision details |
+| GET | `/api/events/{user_id}` | Get stored calendar events |
+| POST | `/api/events/{user_id}` | Create new calendar event |
+| GET | `/api/tasks/{user_id}` | Get task list |
+| POST | `/api/tasks/{user_id}` | Create new task |
+| GET | `/api/decisions/{user_id}/similar` | Find similar past decisions |
+
+### Main Decision Endpoint - `/api/prioritize_tasks`
+
+**Purpose:** Primary endpoint for Vertex AI task prioritization with calendar integration
+
+**Request:**
 ```json
 POST /api/prioritize_tasks
+Content-Type: application/json
+
 {
+    "user_id": "user_001",
     "tasks": [
-        "Go to gym at 6 PM",
-        "Attend interview at 7 PM",
-        "Watch Netflix",
-        "Prepare dinner"
+        "Complete project report",
+        "Attend gym at 6 PM",
+        "Interview at 7 PM"
     ]
 }
 ```
 
-Sample response:
+**Response (Success):**
+```json
+{
+    "prioritized_tasks": [
+        "Interview at 7 PM",
+        "Complete project report",
+        "Attend gym at 6 PM"
+    ],
+    "decision": "Do Interview at 7 PM first, then Complete project report.",
+    "reason": "Fixed-time appointment (Interview) is highest priority. Must attend at scheduled time. After interview, focus on project report. Gym is flexible and can be rescheduled."
+}
+```
 
+**Response (No Calendar):**
 ```json
 {
     "prioritized_tasks": [
         "Attend interview at 7 PM",
-        "Prepare dinner",
-        "Go to gym at 6 PM",
-        "Watch Netflix"
+        "Complete project report",
+        "Attend gym at 6 PM"
     ],
-    "decision": "Attend interview and skip gym",
-    "reason": "Interview has highest priority and fixed time constraint"
+    "decision": "Attend interview and focus on project after.",
+    "reason": "Fixed appointments take priority over flexible tasks."
 }
 ```
+
+### Execute Action Endpoint - `/api/execute_action`
+
+**Purpose:** Execute calendar actions based on decision
+
+**Request:**
+```json
+POST /api/execute_action
+Content-Type: application/json
+
+{
+    "user_id": "user_001",
+    "action_type": "cancel_event",
+    "event_id": "event_12345",
+    "params": {}
+}
+```
+
+**Supported Actions:**
+- `create_event` - Create new calendar event
+- `reschedule_event` - Move event to different time
+- `cancel_event` - Delete/cancel event
+- `add_task` - Add task to database
+
+**Response:**
+```json
+{
+    "success": true,
+    "action": "cancel_event",
+    "message": "Event cancelled successfully",
+    "event_id": "event_12345"
+}
+```
+
+### Calendar Events Endpoint - `/api/calendar/events`
+
+**Purpose:** Get upcoming calendar events for a user
+
+**Request:**
+```bash
+GET /api/calendar/events?user_id=user_001&hours=24
+```
+
+**Parameters:**
+- `user_id` (string): User identifier
+- `hours` (integer, optional): Look-ahead window in hours (default: 24)
+
+**Response:**
+```json
+{
+    "events": [
+        {
+            "id": "event_123",
+            "title": "Team Meeting",
+            "start_time": "2026-04-08T14:00:00+00:00",
+            "end_time": "2026-04-08T15:00:00+00:00",
+            "description": "Weekly sync"
+        },
+        {
+            "id": "event_456",
+            "title": "Doctor Appointment",
+            "start_time": "2026-04-08T21:30:00+00:00",
+            "end_time": "2026-04-08T22:00:00+00:00",
+            "description": "Annual checkup"
+        }
+    ],
+    "user_id": "user_001",
+    "fetched_at": "2026-04-08T12:00:00+00:00"
+}
+```
+
+### Calendar Status Endpoint - `/api/calendar/status`
+
+**Purpose:** Check if user has valid Google Calendar authentication
+
+**Request:**
+```bash
+GET /api/calendar/status?user_id=user_001
+```
+
+**Response:**
+```json
+{
+    "user_id": "user_001",
+    "authenticated": true,
+    "has_credentials": true,
+    "oauth_flow_available": true,
+    "next_step": "Ready to fetch events"
+}
+```
+
+### Health Check Endpoint - `/api/health`
+
+**Purpose:** Verify service is running and databases are accessible
+
+**Request:**
+```bash
+GET /api/health
+```
+
+**Response:**
+```json
+{
+    "status": "healthy",
+    "timestamp": "2026-04-08T12:00:00Z",
+    "services": {
+        "api": "ok",
+        "database": "ok",
+        "vertex_ai": "ok"
+    }
+}
+```
+
+### Error Responses
+
+All endpoints follow this error format:
+
+```json
+{
+    "detail": "Error description",
+    "status": 400,
+    "error_code": "ERROR_CODE"
+}
+```
+
+**Common Status Codes:**
+- `200` - Success
+- `400` - Bad request (missing/invalid parameters)
+- `401` - Unauthorized (OAuth required)
+- `404` - Resource not found
+- `500` - Server error
 
 ---
 
 ## 🛠 Tech Stack
 
-| Component | Technology |
-|-----------|------------|
-| Backend Framework | FastAPI |
-| LLM Provider | Vertex AI Gemini (`google/gemini-2.5-flash`) |
-| Database | PostgreSQL / SQLite |
-| ORM | SQLAlchemy |
-| Calendar | Google Calendar API |
-| Streaming | Server-Sent Events (SSE) |
-| Frontend | Vanilla JavaScript + CSS |
+| Component | Technology | Version/Details |
+|-----------|------------|-----------------|
+| **Deployment** | Google Cloud Run | asia-south1 region, 3600s timeout |
+| **Backend Framework** | FastAPI | 0.100+ |
+| **LLM for Prioritization** | Vertex AI (Google Cloud) | `google/gemini-2.5-flash` |
+| **LLM for Analysis** | Gemini API | `gemini-2.0-flash` |
+| **Database** | PostgreSQL / SQLite | Production: PostgreSQL, Local: SQLite fallback |
+| **ORM** | SQLAlchemy | 2.0+ |
+| **Calendar Integration** | Google Calendar API | OAuth 2.0 PKCE flow, per-user tokens |
+| **Frontend** | Vanilla JavaScript + CSS | No framework, lightweight |
+| **Real-time** | Server-Sent Events (SSE) | For legacy `/api/decide` endpoint |
+| **Authentication** | Google OAuth 2.0 | Web application flow for Cloud Run |
+| **Async Runtime** | AsyncIO/Uvicorn | Production-grade async server |
 
-### Dependencies
+### Environment Variables
+
+**Required:**
+```
+VERTEX_AI_PROJECT=your-gcp-project-id
+VERTEX_AI_MODEL=google/gemini-2.5-flash
+VERTEX_AI_LOCATION=us-central1
+GEMINI_API_KEY=your-gemini-api-key    # For legacy endpoints
+```
+
+**Optional:**
+```
+DATABASE_URL=postgresql://user:pwd@host:5432/decisionos
+GOOGLE_CREDENTIALS_JSON={"type":"service_account",...}
+DECISIONOS_REQUIRE_AUTH=0
+GOOGLE_CALENDAR_CLIENT_TYPE=web    # or "installed"
+```
+
+### Production Architecture
 
 ```
-fastapi>=0.100.0
-uvicorn>=0.22.0
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.0
-openai>=1.0.0
-google-api-python-client>=2.100.0
-google-auth>=2.22.0
-google-auth-oauthlib>=1.0.0
-pydantic>=2.0.0
-python-dotenv>=1.0.0
+User Browser
+     │
+     ▼
+Google Cloud Run (asia-south1)
+  ├─ FastAPI App (decisionos-00033-wmd)
+  ├─ Vertex AI Client (us-central1)
+  ├─ PostgreSQL (Cloud SQL)
+  └─ Google Calendar API
 ```
 
 ---
@@ -483,45 +714,120 @@ python-dotenv>=1.0.0
 
 ---
 
+## ✅ Production Validation
+
+### Health Check
+```bash
+curl https://decisionos-837202638935.asia-south1.run.app/api/health
+```
+
+Expected response:
+```json
+{"status":"healthy","services":{"api":"ok","database":"ok","vertex_ai":"ok"}}
+```
+
+### Quick End-to-End Test
+```bash
+curl -X POST "https://decisionos-837202638935.asia-south1.run.app/api/prioritize_tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "demo",
+    "tasks": ["gym", "doctor appointment at 9pm", "manager meeting at 10pm"]
+  }' | python -m json.tool
+```
+
+### Local Regression Suite
+```bash
+python backend/tools/decision_regression_suite.py
+```
+
+This validates 15+ decision scenarios to ensure quality and specificity.
+
+---
+
+## 📊 Architecture Cleanup
+
+**Removed/Deprecated:**
+- ❌ `POST /api/decide` - Legacy SSE streaming (use `/api/prioritize_tasks`)
+- ❌ `POST /api/prioritize` - Old day planner (use `/api/prioritize_tasks`)
+- ❌ Local token.json storage - Now DB-based per-user tokens
+- ❌ Installed OAuth flow - Now web-only for Cloud Run compatibility
+- ❌ ai_engine/ (old directory) - Consolidated to ai-engine/
+
+**Kept (Production Ready):**
+- ✅ `POST /api/prioritize_tasks` - Main decision endpoint (Vertex AI backed)
+- ✅ `GET/POST /api/calendar/*` - Calendar integration (OAuth, events, status)
+- ✅ `POST /api/execute_action` - MCP tool execution
+- ✅ Multi-agent trace UI - Real-time agent pipeline visualization
+- ✅ PostgreSQL persistence - User tokens, events, decisions
+- ✅ Google Cloud Run deployment - Production infrastructure
+
+---
+
 ## 📁 Project Structure
 
 ```
-decisionos/
-├── backend/
-│   ├── main.py              # FastAPI application
-│   ├── routes.py            # API endpoints
-│   ├── schemas.py           # Pydantic models
+DecisionOs/
+├── README.md                        # This file
+├── GOOGLE_CALENDAR_SETUP.md         # OAuth setup guide
+├── LICENSE                          # MIT
+├── requirements.txt                 # Python dependencies
+├── Dockerfile                       # Container config for Cloud Run
+│
+├── backend/                         # FastAPI Backend
+│   ├── main.py                      # App entry point
+│   ├── routes.py                    # API endpoints (18 total)
+│   ├── schemas.py                   # Pydantic request/response models
 │   ├── db/
-│   │   └── database.py      # Database models & setup
+│   │   └── database.py              # SQLAlchemy models, PostgreSQL setup
 │   └── tools/
-│       ├── mcp_tools.py     # MCP tool implementations
-│       └── google_calendar.py # Google Calendar service
+│       ├── mcp_tools.py             # MCP tool implementations
+│       ├── google_calendar.py       # OAuth flows, Calendar service
+│       └── decision_regression_suite.py  # 15+ scenario tests
 │
-├── ai_engine/
-│   ├── orchestrator.py      # Agent coordination
+├── ai-engine/                       # Multi-Agent Orchestration
+│   ├── orchestrator.py              # Main pipeline coordinator
 │   ├── config/
-│   │   └── defaults.py      # System defaults & priorities
+│   │   └── defaults.py              # System defaults, priorities
 │   ├── utils/
-│   │   ├── helpers.py       # JSON parsing, etc.
-│   │   └── time_resolver.py # Time parsing
+│   │   ├── helpers.py               # JSON parsing, utilities
+│   │   └── time_resolver.py         # Time/date parsing
 │   └── agents/
-│       ├── planner_agent.py
-│       ├── task_agent.py
-│       ├── calendar_agent.py
-│       ├── scenario_agent.py
-│       └── decision_engine.py
+│       ├── planner_agent.py         # Task analysis agent
+│       ├── task_agent.py            # Priority scoring agent
+│       ├── calendar_agent.py        # Calendar constraint agent
+│       ├── scenario_agent.py        # Scenario simulation agent
+│       └── decision_engine.py       # Final Vertex AI decision agent
 │
-├── frontend/
-│   ├── index.html           # Main UI
-│   ├── app.js               # Frontend logic
-│   └── styles.css           # Styling
+├── frontend/                        # Vanilla JS/CSS UI
+│   ├── index.html                   # Main page
+│   ├── app.js                       # Multi-agent trace UI logic
+│   └── styles.css                   # Styling
 │
-├── credentials.json         # Google OAuth (not in git)
-├── token.json               # Google token (not in git)
-├── requirements.txt         # Python dependencies
-├── README.md                # This file
-└── GOOGLE_CALENDAR_SETUP.md # Calendar setup guide
+├── credentials.example.json         # OAuth template (for reference)
+├── credentials.json                 # Google OAuth credentials (not in git)
+└── token.json                       # User tokens storage (not in git)
 ```
+
+### Key Files by Purpose
+
+**API & Routing:**
+- `backend/main.py` - FastAPI app initialization, CORS setup
+- `backend/routes.py` - All 18 endpoints (prioritize_tasks is main)
+
+**Multi-Agent Logic:**
+- `ai-engine/orchestrator.py` - Coordinates all agents
+- `ai-engine/agents/*.py` - Individual agent implementations
+
+**Database:**
+- `backend/db/database.py` - User, Decision, CalendarEvent, Task models
+
+**Calendar Integration:**
+- `backend/tools/google_calendar.py` - OAuth and Calendar API
+- `GOOGLE_CALENDAR_SETUP.md` - Setup instructions
+
+**Frontend:**
+- `frontend/app.js` - Single-page app with multi-agent trace rendering
 
 ---
 
