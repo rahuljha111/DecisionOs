@@ -11,8 +11,12 @@ from collections import Counter
 from datetime import datetime, timedelta
 import os
 import json
+from urllib import request as urllib_request
+from urllib.error import HTTPError, URLError
 from pydantic import BaseModel, Field
 from openai import AsyncOpenAI
+import google.auth
+from google.auth.transport.requests import Request as GoogleAuthRequest
 
 from backend.db.database import get_db, Decision, CalendarEvent, Task, get_or_create_user, User, GoogleCalendarToken
 from backend.schemas import DecisionRequest, EventCreate, TaskCreate, ExecuteActionRequest
@@ -32,6 +36,9 @@ gemini_client = AsyncOpenAI(
 )
 
 GEMINI_MODEL = "gemini-2.0-flash"
+VERTEX_MODEL = os.environ.get("VERTEX_AI_MODEL", "gemini-2.0-flash-001")
+VERTEX_LOCATION = os.environ.get("VERTEX_AI_LOCATION", "us-central1")
+VERTEX_PROJECT = os.environ.get("VERTEX_AI_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
 PRIORITIZE_TEMPERATURE = 0.2
 
 PRIORITIZE_TASKS_SYSTEM_PROMPT = """You are a task prioritization planner.
@@ -171,6 +178,115 @@ async def _prioritize_tasks_with_gemini(tasks: List[str]) -> dict:
         "decision": decision,
         "reason": reason,
     }
+
+
+def _build_prioritize_response(tasks: List[str], parsed: dict) -> dict:
+    """Normalize model JSON into stable API response shape."""
+    model_prioritized = parsed.get("prioritized_tasks", [])
+    if not isinstance(model_prioritized, list):
+        raise HTTPException(status_code=502, detail="Model response missing prioritized_tasks list")
+
+    prioritized_tasks = _normalize_prioritized_tasks(tasks, model_prioritized)
+    if not prioritized_tasks:
+        raise HTTPException(status_code=502, detail="Model response produced empty prioritized task list")
+
+    decision = (parsed.get("decision") or "").strip()
+    reason = (parsed.get("reason") or "").strip()
+
+    if not decision:
+        if len(prioritized_tasks) > 1:
+            decision = f"Do {prioritized_tasks[0]} first, then {prioritized_tasks[1]}."
+        else:
+            decision = f"Do {prioritized_tasks[0]} first."
+
+    if not reason:
+        reason = "This order balances urgency, deadlines, and overall impact."
+
+    return {
+        "prioritized_tasks": prioritized_tasks,
+        "decision": decision,
+        "reason": reason,
+    }
+
+
+async def _prioritize_tasks_with_vertex(tasks: List[str]) -> dict:
+    """Use Vertex AI Gemini (ADC auth) for task prioritization."""
+    project = VERTEX_PROJECT
+    if not project:
+        _, inferred_project = google.auth.default()
+        project = inferred_project
+    if not project:
+        raise HTTPException(status_code=503, detail="Vertex AI project is not configured")
+
+    try:
+        credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        credentials.refresh(GoogleAuthRequest())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Vertex AI authentication failed") from exc
+
+    url = (
+        f"https://{VERTEX_LOCATION}-aiplatform.googleapis.com/v1/"
+        f"projects/{project}/locations/{VERTEX_LOCATION}/publishers/google/models/{VERTEX_MODEL}:generateContent"
+    )
+
+    prompt = (
+        f"{PRIORITIZE_TASKS_SYSTEM_PROMPT}\n\n"
+        f"Input JSON:\n{json.dumps({'tasks': tasks})}\n\n"
+        "Return JSON only."
+    )
+
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": PRIORITIZE_TEMPERATURE,
+            "responseMimeType": "application/json",
+        },
+    }
+
+    req = urllib_request.Request(
+        url=url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {credentials.token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib_request.urlopen(req, timeout=45) as resp:
+            response_body = resp.read().decode("utf-8")
+            vertex_response = json.loads(response_body)
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else ""
+        message = error_body or str(exc)
+        if exc.code in (429, 503):
+            raise HTTPException(status_code=503, detail="Vertex AI quota exceeded. Please retry later.") from exc
+        if exc.code in (401, 403):
+            raise HTTPException(status_code=503, detail="Vertex AI permission denied. Ensure Cloud Run service account has roles/aiplatform.user.") from exc
+        raise HTTPException(status_code=502, detail=f"Vertex AI request failed ({exc.code})") from exc
+    except URLError as exc:
+        raise HTTPException(status_code=502, detail="Vertex AI network request failed") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Vertex AI response parsing failed") from exc
+
+    candidates = vertex_response.get("candidates", [])
+    text = ""
+    if candidates and isinstance(candidates[0], dict):
+        parts = (((candidates[0].get("content") or {}).get("parts")) or [])
+        if parts and isinstance(parts[0], dict):
+            text = parts[0].get("text", "")
+
+    parsed = safe_json(text)
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=502, detail="Vertex AI returned invalid JSON")
+
+    return _build_prioritize_response(tasks, parsed)
 
 
 @router.post("/decide")
@@ -668,12 +784,18 @@ async def prioritize_day(
 
 @router.post("/prioritize_tasks")
 async def prioritize_tasks_only(request: TaskPrioritizeRequest):
-    """Prioritize a plain list of tasks with Gemini and return simple JSON output."""
+    """Prioritize a plain list of tasks using Vertex AI Gemini and return simple JSON output."""
     tasks = [task.strip() for task in request.tasks if isinstance(task, str) and task.strip()]
     if not tasks:
         raise HTTPException(status_code=400, detail="tasks must contain at least one non-empty task")
 
-    return await _prioritize_tasks_with_gemini(tasks)
+    try:
+        return await _prioritize_tasks_with_vertex(tasks)
+    except HTTPException as vertex_error:
+        # Optional fallback for local/dev environments still using AI Studio key mode.
+        if os.environ.get("GEMINI_API_KEY", "").strip():
+            return await _prioritize_tasks_with_gemini(tasks)
+        raise vertex_error
 
 
 # ============================================================
