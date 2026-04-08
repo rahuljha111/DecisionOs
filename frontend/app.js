@@ -801,6 +801,13 @@ function displayFinalDecision(data) {
   const consequenceText =
     decision.consequence ||
     "If you ignore this decision, the highest-impact risk will remain unresolved.";
+  const selectedScore = Number(decision.score);
+  const selectedScoreText = Number.isFinite(selectedScore)
+    ? `${Math.round(selectedScore)}/100`
+    : "N/A";
+  const rejected = Array.isArray(decision.rejected_alternatives)
+    ? decision.rejected_alternatives
+    : [];
 
   let conflictBadge = "";
   if (decision.conflict_type && decision.conflict_type !== "none") {
@@ -817,20 +824,33 @@ function displayFinalDecision(data) {
           <div class="decision-section-label">[Decision]</div>
           <div class="decision-action">
             <span class="action-icon">🎯</span>
-            <span class="action-text">${decisionText}</span>
+            <span class="action-text">${escapeHtml(decisionText)}</span>
           </div>
             </div>
             ${conflictBadge}
         <div class="decision-section">
+          <div class="decision-section-label">[Why Chosen]</div>
+          <div class="decision-evidence">
+            <p><strong>Selected option score:</strong> ${selectedScoreText}</p>
+            ${
+              rejected.length
+                ? `<p><strong>Rejected alternatives:</strong></p><ul>${rejected
+                    .map((item) => `<li>${escapeHtml(item)}</li>`)
+                    .join("")}</ul>`
+                : "<p>No alternative comparison data returned.</p>"
+            }
+          </div>
+        </div>
+        <div class="decision-section">
           <div class="decision-section-label">[Reason]</div>
           <div class="decision-reasoning">
-            <p>${reasonText}</p>
+            <p>${escapeHtml(reasonText)}</p>
                 </div>
         </div>
         <div class="decision-section">
           <div class="decision-section-label">[Consequence]</div>
           <div class="decision-consequence">
-            <p>${consequenceText}</p>
+            <p>${escapeHtml(consequenceText)}</p>
                 </div>
             </div>
         <div class="decision-confidence confidence-${confidenceClass}">
@@ -847,7 +867,7 @@ function displayFinalDecision(data) {
                 ? `
             <div class="decision-steps">
                 <h4>Next steps</h4>
-                <ol>${decision.next_steps.map((s) => `<li>${s}</li>`).join("")}</ol>
+                <ol>${decision.next_steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ol>
             </div>`
                 : ""
             }
