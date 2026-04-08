@@ -487,6 +487,64 @@ async function submitDecision() {
 
   try {
     const traceContainer = document.getElementById("traceContainer");
+    let calendarEvents = [];
+
+    addTraceItem(traceContainer, {
+      type: "agent",
+      status: "running",
+      agent: "planner",
+      message: "Classifying tasks and building workflow context...",
+    });
+    await delay(180);
+    const plannerData = buildPlannerSummary(pendingTasks);
+    updateTraceItem("planner", "complete", plannerData);
+
+    addTraceItem(traceContainer, {
+      type: "agent",
+      status: "running",
+      agent: "task",
+      message: "Scoring urgency and impact across pending tasks...",
+    });
+    await delay(180);
+    const taskData = buildTaskSummary(pendingTasks);
+    updateTraceItem("task", "complete", taskData);
+
+    addTraceItem(traceContainer, {
+      type: "agent",
+      status: "running",
+      agent: "calendar",
+      message: "Fetching Google Calendar constraints and conflicts...",
+    });
+    try {
+      const calRes = await fetch(`${API_BASE}/calendar/events?user_id=${encodeURIComponent(userId)}`);
+      if (calRes.ok) {
+        const calData = await calRes.json();
+        calendarEvents = Array.isArray(calData.events) ? calData.events : [];
+        todayMeetings = calendarEvents.map((e) => ({
+          time: e.start_time || e.time || "",
+          title: e.title || e.summary || "Event",
+        }));
+        renderMeetings();
+      }
+    } catch (_err) {
+      calendarEvents = [];
+    }
+    await delay(120);
+    updateTraceItem("calendar", "complete", {
+      has_conflict: calendarEvents.length > 0,
+    });
+
+    addTraceItem(traceContainer, {
+      type: "agent",
+      status: "running",
+      agent: "scenario",
+      message: "Simulating execution paths from task + calendar state...",
+    });
+    await delay(180);
+    const scenarioData = buildScenarioOptions(pendingTasks, calendarEvents, taskData.priority);
+    updateTraceItem("scenario", "complete", scenarioData);
+    displayScenarios(scenarioData);
+
     addTraceItem(traceContainer, {
       type: "processing",
       status: "running",
@@ -508,17 +566,24 @@ async function submitDecision() {
       : pendingTasks;
 
     updateProcessingItem("vertex_ai", "complete");
+    addTraceItem(traceContainer, {
+      type: "agent",
+      status: "complete",
+      agent: "decision_engine",
+      message: "Vertex AI selected final action from simulated context.",
+    });
 
     const chosen = prioritized[0] || pendingTasks[0] || "Top task";
     const rejected = prioritized.slice(1).map((task, idx) => `${task}: deferred (rank ${idx + 2})`);
+    const topScenarioScore = Math.max(...(scenarioData.options || []).map((o) => Number(o.score) || 0), 70);
     const decisionPayload = {
       decision: {
         action: chosen,
         decision_text: data.decision || `Start with ${chosen}`,
-        reasoning: data.reason || "Prioritized by Vertex AI using provided task and calendar context.",
+        reasoning: data.reason || "Prioritized by Vertex AI using tasks, calendar constraints, and scenario simulation context.",
         consequence: "If ignored, lower-impact tasks may consume critical focus time.",
-        confidence: 0.9,
-        score: 90,
+        confidence: Math.min(0.97, Math.max(0.72, topScenarioScore / 100)),
+        score: Math.round(topScenarioScore),
         rejected_alternatives: rejected,
         next_steps: prioritized.slice(0, 3).map((task, idx) => `Step ${idx + 1}: ${task}`),
         executable_actions: [],
@@ -532,6 +597,74 @@ async function submitDecision() {
   } finally {
     setProcessing(false);
   }
+}
+
+function buildPlannerSummary(tasks) {
+  const text = tasks.join(" ").toLowerCase();
+  let taskType = "mixed";
+  if (/meeting|appointment|call|sync/.test(text)) taskType = "schedule";
+  else if (/submit|important|deadline|report|presentation/.test(text)) taskType = "work";
+  else if (/gym|workout|eat|family|health/.test(text)) taskType = "personal";
+  return { task_type: taskType };
+}
+
+function buildTaskSummary(tasks) {
+  const weights = tasks.map((task) => {
+    const t = task.toLowerCase();
+    let score = 4;
+    if (/urgent|important|deadline|submit|final/.test(t)) score += 4;
+    if (/meeting|appointment|call|sync|at\s*\d/.test(t)) score += 3;
+    if (/gym|reels|watch|social/.test(t)) score -= 1;
+    return Math.max(1, Math.min(10, score));
+  });
+  const top = weights.length ? Math.max(...weights) : 5;
+  return { priority: top };
+}
+
+function buildScenarioOptions(tasks, events, urgency) {
+  const hasCalendar = events.length > 0;
+  const topTask = tasks[0] || "Top task";
+
+  const options = [
+    {
+      action: "execute_top_task_now",
+      score: hasCalendar ? 62 + urgency * 2 : 70 + urgency * 2,
+      urgency_factor: urgency,
+      task_priority: urgency >= 7 ? "high" : "medium",
+      event_priority: hasCalendar ? "high" : "low",
+      description: `Start ${topTask} immediately in the next focus window`,
+      risks: hasCalendar ? ["May overlap with fixed-time event"] : ["Low risk"],
+    },
+    {
+      action: "align_with_calendar_first",
+      score: hasCalendar ? 74 : 46,
+      urgency_factor: urgency,
+      task_priority: urgency >= 8 ? "high" : "medium",
+      event_priority: hasCalendar ? "high" : "low",
+      description: hasCalendar
+        ? "Handle fixed-time calendar commitment first, then high-impact work"
+        : "No fixed meeting pressure; alignment adds overhead",
+      risks: hasCalendar ? ["Task starts slightly later"] : ["Unnecessary delay"],
+    },
+    {
+      action: "defer_until_later_window",
+      score: Math.max(18, 48 - urgency * 3),
+      urgency_factor: urgency,
+      task_priority: urgency >= 7 ? "high" : "low",
+      event_priority: hasCalendar ? "medium" : "low",
+      description: "Delay top task and pick lower-effort items first",
+      risks: ["Deadline risk", "Reduced focus quality"],
+    },
+  ].map((opt) => ({
+    ...opt,
+    score: Math.max(1, Math.min(99, Math.round(opt.score))),
+  }));
+
+  const sorted = [...options].sort((a, b) => b.score - a.score);
+  return {
+    options: sorted,
+    recommendation: sorted[0]?.action,
+  };
 }
 
 // ─── SSE Event Router ─────────────────────────────────────────────────────────
