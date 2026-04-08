@@ -90,6 +90,20 @@ async function fetchCalendarEvents() {
 
   try {
     const userId = document.getElementById("userId").value.trim() || "user_001";
+    const statusRes = await fetch(
+      `${API_BASE}/calendar/status?user_id=${encodeURIComponent(userId)}`,
+    );
+    if (!statusRes.ok) throw new Error("Failed to fetch calendar status");
+    const status = await statusRes.json();
+    if (!status.authenticated) {
+      calendarConnected = false;
+      btn.classList.remove("connected");
+      label.textContent = "Connect Google Calendar";
+      renderMeetings();
+      showToast("Google Calendar is not authenticated. Please reconnect.", "error");
+      return;
+    }
+
     const res = await fetch(
       `${API_BASE}/calendar/events?user_id=${encodeURIComponent(userId)}`,
     );
@@ -264,30 +278,34 @@ async function prioritizeMyDay() {
         </div>`;
 
   try {
-    // Try real backend endpoint first
+    // Use Vertex-backed endpoint for model-driven prioritization.
     const userId = document.getElementById("userId").value.trim() || "user_001";
 
-    const res = await fetch(`${API_BASE}/prioritize`, {
+    const res = await fetch(`${API_BASE}/prioritize_tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_id: userId,
         tasks: pendingTasks,
-        meetings: todayMeetings,
       }),
     }).catch(() => null);
 
     if (res && res.ok) {
       const data = await res.json();
-      renderAiPlan(data.plan || []);
+      const orderedTasks = data.prioritized_tasks || [];
+      const decision = data.decision || "";
+      const plan = orderedTasks.map((task, index) => ({
+        task,
+        start: `${index + 1}`,
+        end: "",
+        note: index === 0 && decision ? decision : (data.reason || "Model-prioritized"),
+      }));
+      renderAiPlan(plan);
     } else {
-      // Fallback: build a smart demo plan locally
-      const demoPlan = buildDemoPlan(pendingTasks, todayMeetings);
-      renderAiPlan(demoPlan);
+      throw new Error("Prioritization endpoint failed");
     }
   } catch (err) {
-    const demoPlan = buildDemoPlan(pendingTasks, todayMeetings);
-    renderAiPlan(demoPlan);
+    planList.innerHTML = `<div class="ai-plan-loading"><span>⚠️</span> Could not generate AI plan from backend. Please retry.</div>`;
   } finally {
     btn.disabled = false;
     btn.innerHTML = `

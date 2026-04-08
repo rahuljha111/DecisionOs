@@ -796,7 +796,7 @@ async def google_calendar_oauth_callback(
     return HTMLResponse(
         content=(
             "<html><body><script>"
-            f"window.opener && window.opener.postMessage({{ type: 'google-calendar-auth', success: true, user_id: '{state}' }}, '*');"
+            "window.opener && window.opener.postMessage({ type: 'google-calendar-auth', success: true }, '*');"
             "window.close();"
             "</script><p>Google Calendar connected. You can close this window.</p></body></html>"
         )
@@ -829,6 +829,13 @@ async def get_google_calendar_events(
         List of calendar events with source info
     """
     from backend.tools.mcp_tools import MCPTools
+    service = get_google_calendar_service() if is_google_calendar_available() else None
+    authenticated = False
+    if service is not None:
+        try:
+            authenticated = service.authenticate(user_id=user_id, db=db, interactive=False)
+        except Exception:
+            authenticated = False
     
     mcp = MCPTools(db, user_id)
     
@@ -853,6 +860,7 @@ async def get_google_calendar_events(
         "events": serialized,
         "count": len(events),
         "source": source,
+        "authenticated": authenticated,
         "user_id": user_id,
         "time_window": {
             "start": start.isoformat(),
