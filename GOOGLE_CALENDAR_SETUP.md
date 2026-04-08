@@ -32,11 +32,14 @@
 4. Name: `DecisionOS Web`
 5. Add **Authorized redirect URIs**:
    - `http://localhost`
-   - `https://<your-cloud-run-url>/api/calendar/oauth/callback`
+   - `http://localhost:8000/api/calendar/oauth/callback`
+   - `https://decisionos-837202638935.asia-south1.run.app/api/calendar/oauth/callback`
 6. Click **Create**
 7. Click **Download JSON**
 8. Rename downloaded file to `credentials.json`
 9. Move it to: `D:\Development\Projects\AI\DecisionOs\credentials.json`
+
+Important: the JSON must contain a top-level `web` object (not `installed`) for Cloud Run OAuth redirect flows.
 
 ### Step 4B: Cloud Run Secret Setup (Production)
 1. Open the downloaded OAuth JSON file
@@ -74,7 +77,8 @@ Once authenticated, DecisionOS will:
 ### `redirect_uri_mismatch`
 - Ensure both local and production callback URLs are listed in the OAuth client:
    - `http://localhost`
-   - `https://<your-cloud-run-url>/api/calendar/oauth/callback`
+   - `http://localhost:8000/api/calendar/oauth/callback`
+   - `https://decisionos-837202638935.asia-south1.run.app/api/calendar/oauth/callback`
 
 ## API Endpoints
 
