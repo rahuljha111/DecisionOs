@@ -206,13 +206,49 @@ def _resolve_vertex_bearer_token() -> str:
 
 
 def _get_upcoming_calendar_context(db: Session, user_id: str, horizon_hours: int = 24) -> List[dict]:
-    """Return upcoming events for model context in a compact structure."""
+    """Return upcoming events for model context using Google/MCP first, DB fallback."""
+    now = datetime.now()
+    horizon = now + timedelta(hours=horizon_hours)
+
+    # Primary path: MCP tools (Google Calendar when authenticated, DB fallback internally).
+    try:
+        from backend.tools.mcp_tools import MCPTools
+
+        mcp = MCPTools(db, user_id)
+        events, _source = mcp.get_events_in_range(now, horizon)
+        if events:
+            normalized = []
+            for event in events[:10]:
+                start_val = event.get("start_time")
+                end_val = event.get("end_time")
+
+                if isinstance(start_val, datetime):
+                    start_iso = start_val.isoformat()
+                else:
+                    start_iso = str(start_val or "")
+
+                if isinstance(end_val, datetime):
+                    end_iso = end_val.isoformat()
+                else:
+                    end_iso = str(end_val or "")
+
+                normalized.append(
+                    {
+                        "title": event.get("title") or "Calendar event",
+                        "start": start_iso,
+                        "end": end_iso,
+                    }
+                )
+            if normalized:
+                return normalized
+    except Exception:
+        pass
+
+    # Explicit DB fallback if MCP path yields no events.
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         return []
 
-    now = datetime.now()
-    horizon = now + timedelta(hours=horizon_hours)
     events = (
         db.query(CalendarEvent)
         .filter(

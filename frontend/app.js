@@ -496,7 +496,7 @@ async function submitDecision() {
       message: "Classifying tasks and building workflow context...",
     });
     await delay(180);
-    const plannerData = buildPlannerSummary(pendingTasks);
+    const plannerData = buildPlannerSummary(pendingTasks, todayMeetings);
     updateTraceItem("planner", "complete", plannerData);
 
     addTraceItem(traceContainer, {
@@ -506,7 +506,7 @@ async function submitDecision() {
       message: "Scoring urgency and impact across pending tasks...",
     });
     await delay(180);
-    const taskData = buildTaskSummary(pendingTasks);
+    const taskData = buildTaskSummary(pendingTasks, todayMeetings);
     updateTraceItem("task", "complete", taskData);
 
     addTraceItem(traceContainer, {
@@ -599,8 +599,13 @@ async function submitDecision() {
   }
 }
 
-function buildPlannerSummary(tasks) {
-  const text = tasks.join(" ").toLowerCase();
+function buildPlannerSummary(tasks, meetings = []) {
+  const taskText = tasks.join(" ").toLowerCase();
+  const meetingText = meetings
+    .map((m) => `${m.title || ""} ${m.time || ""}`)
+    .join(" ")
+    .toLowerCase();
+  const text = `${taskText} ${meetingText}`;
   let taskType = "mixed";
   if (/meeting|appointment|call|sync/.test(text)) taskType = "schedule";
   else if (/submit|important|deadline|report|presentation/.test(text)) taskType = "work";
@@ -608,12 +613,14 @@ function buildPlannerSummary(tasks) {
   return { task_type: taskType };
 }
 
-function buildTaskSummary(tasks) {
+function buildTaskSummary(tasks, meetings = []) {
   const weights = tasks.map((task) => {
     const t = task.toLowerCase();
     let score = 4;
     if (/urgent|important|deadline|submit|final/.test(t)) score += 4;
     if (/meeting|appointment|call|sync|at\s*\d/.test(t)) score += 3;
+    // Raise urgency if there are active calendar constraints in the same window.
+    if (meetings.length > 0) score += 1;
     if (/gym|reels|watch|social/.test(t)) score -= 1;
     return Math.max(1, Math.min(10, score));
   });
