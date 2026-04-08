@@ -248,8 +248,8 @@ def _build_concrete_decision_text(action: str, event_name: str, task_name: str, 
     if "reschedule" in action_lower:
         return f"Reschedule {event_name} and complete {task_name} first."
     if "focus" in action_lower or "start" in action_lower:
-        return f"Start {task_name} now and stop distractions."
-    return f"Start {task_name} now."
+        return f"Start {task_name} and stop distractions."
+    return f"Start {task_name}."
 
 
 def _build_aligned_sections(decision_text: str, raw_text: str) -> Dict[str, Any]:
@@ -269,8 +269,8 @@ def _build_aligned_sections(decision_text: str, raw_text: str) -> Dict[str, Any]
         else:
             consequence = f"If ignored, {must_attend} will be delayed and the outcome quality will drop."
         next_steps = [
-            f"Attend {must_attend} now.",
-            f"Skip {must_skip} now.",
+            f"Attend {must_attend}.",
+            f"Skip {must_skip}.",
             "Start the highest-impact remaining task immediately after."
         ]
 
@@ -282,9 +282,9 @@ def _build_aligned_sections(decision_text: str, raw_text: str) -> Dict[str, Any]
         reason = f"{must_attend} is non-negotiable; {must_skip_1} and {must_skip_2} are lower-priority conflicts."
         consequence = f"If ignored, you risk missing {must_attend} and taking direct academic or career loss."
         next_steps = [
-            f"Attend {must_attend} now.",
-            f"Skip {must_skip_1} now.",
-            f"Skip {must_skip_2} now."
+            f"Attend {must_attend}.",
+            f"Skip {must_skip_1}.",
+            f"Skip {must_skip_2}."
         ]
 
     match_attend_reschedule = re.match(r"^Attend (.+?) and reschedule (.+?)\.$", text)
@@ -293,29 +293,29 @@ def _build_aligned_sections(decision_text: str, raw_text: str) -> Dict[str, Any]
         reason = f"{must_attend} is fixed or higher impact, so {must_reschedule} is moved to remove the conflict."
         consequence = f"If ignored, the conflict remains and {must_attend} is put at risk."
         next_steps = [
-            f"Attend {must_attend} now.",
+            f"Attend {must_attend}.",
             f"Reschedule {must_reschedule} to the next free slot.",
             "Start the top pending task after the event."
         ]
 
-    match_start_stop = re.match(r"^Start (.+?) now and stop (.+?)\.$", text)
+    match_start_stop = re.match(r"^Start (.+?)(?: now)? and stop (.+?)\.$", text)
     if match_start_stop:
         must_start, must_stop = match_start_stop.group(1), match_start_stop.group(2)
         reason = f"{must_start} has higher urgency and impact than {must_stop}."
         consequence = f"If ignored, {must_start} may miss its deadline and create avoidable loss."
         next_steps = [
-            f"Start {must_start} now.",
-            f"Stop {must_stop} now.",
+            f"Start {must_start}.",
+            f"Stop {must_stop}.",
             "Start the next highest-impact task only after finishing this block."
         ]
 
-    match_start_reschedule = re.match(r"^Start (.+?) now and reschedule (.+?)\.$", text)
+    match_start_reschedule = re.match(r"^Start (.+?)(?: now)? and reschedule (.+?)\.$", text)
     if match_start_reschedule:
         must_start, must_reschedule = match_start_reschedule.group(1), match_start_reschedule.group(2)
         reason = f"{must_start} is more urgent and impactful, so {must_reschedule} is moved out of the critical window."
         consequence = f"If ignored, {must_start} remains blocked and the chance of deadline failure increases."
         next_steps = [
-            f"Start {must_start} now.",
+            f"Start {must_start}.",
             f"Reschedule {must_reschedule} after the critical work block.",
             "Start verification immediately after the work block ends."
         ]
@@ -326,23 +326,23 @@ def _build_aligned_sections(decision_text: str, raw_text: str) -> Dict[str, Any]
             reason = f"{target} is the most important action in the current time window."
             consequence = f"If ignored, {target} is delayed and real-world impact worsens."
             next_steps = [
-                f"Start {target} now.",
-                "Stop low-priority distractions now.",
+                f"Start {target}.",
+                "Stop low-priority distractions.",
                 "Start the next highest-impact task after this block."
             ]
         elif lower.startswith("attend "):
             target = text[7:].rstrip(".")
-            reason = f"{target} is the top priority action right now."
+            reason = f"{target} is the top priority action in this window."
             consequence = f"If ignored, you risk missing {target} and losing the outcome tied to it."
             next_steps = [
-                f"Attend {target} now.",
+                f"Attend {target}.",
                 "Skip lower-priority items during this window.",
                 "Start the top pending task immediately after."
             ]
         else:
             next_steps = [
-                "Start the highest-impact task now.",
-                "Stop low-priority work now.",
+                "Start the highest-impact task.",
+                "Stop low-priority work.",
                 "Reschedule conflicting flexible items."
             ]
 
@@ -399,19 +399,19 @@ def _enforce_real_world_wording(
         decision["decision_text"] = f"Attend {non_negotiable} and reschedule {meeting_item}."
     elif high_impact and routine_item:
         decision["action"] = f"start_{high_impact.replace(' ', '_')}"
-        decision["decision_text"] = f"Start {high_impact} now and stop {routine_item}."
+        decision["decision_text"] = f"Start {high_impact} and stop {routine_item}."
     elif high_impact and meeting_item and explicit_meeting_present:
         decision["action"] = f"start_{high_impact.replace(' ', '_')}"
-        decision["decision_text"] = f"Start {high_impact} now and reschedule {meeting_item}."
+        decision["decision_text"] = f"Start {high_impact} and reschedule {meeting_item}."
     elif explicit_overlap:
         decision["action"] = "attend_top_meeting"
         decision["decision_text"] = "Attend the most important meeting and cancel the overlapping meeting."
     elif non_negotiable:
         decision["action"] = f"start_{non_negotiable.replace(' ', '_')}_prep"
-        decision["decision_text"] = f"Start preparation for {non_negotiable} now."
+        decision["decision_text"] = f"Start preparation for {non_negotiable}."
     elif high_impact:
         decision["action"] = f"start_{high_impact.replace(' ', '_')}"
-        decision["decision_text"] = f"Start {high_impact} now."
+        decision["decision_text"] = f"Start {high_impact}."
 
     combined_text = f"{raw_text} {decision.get('decision_text', '')}".lower()
     combined_items = _extract_priority_items(combined_text)
@@ -429,16 +429,16 @@ def _enforce_real_world_wording(
         decision["decision_text"] = f"Attend {c_non_negotiable} and reschedule {c_meeting}."
     elif c_high_impact and c_routine:
         decision["action"] = f"start_{c_high_impact.replace(' ', '_')}"
-        decision["decision_text"] = f"Start {c_high_impact} now and stop {c_routine}."
+        decision["decision_text"] = f"Start {c_high_impact} and stop {c_routine}."
     elif c_high_impact and c_meeting and explicit_meeting_present:
         decision["action"] = f"start_{c_high_impact.replace(' ', '_')}"
-        decision["decision_text"] = f"Start {c_high_impact} now and reschedule {c_meeting}."
+        decision["decision_text"] = f"Start {c_high_impact} and reschedule {c_meeting}."
     elif explicit_overlap:
         decision["action"] = "attend_top_meeting"
         decision["decision_text"] = "Attend the most important meeting and cancel the overlapping meeting."
     elif "nothing urgent" in combined_text:
         decision["action"] = "start_high_impact_task"
-        decision["decision_text"] = "Start one high-impact task now."
+        decision["decision_text"] = "Start one high-impact task."
 
     # Final corrective override if upstream labeling flipped priorities
     event_is_low = is_low_priority_event(event_name)
@@ -449,7 +449,7 @@ def _enforce_real_world_wording(
         decision["decision_text"] = f"Attend {conflicting_item} and skip {event_name}."
     elif "deadline" in conflicting_item.lower() and (event_is_low or event_is_meeting):
         decision["action"] = "start_deadline_work"
-        decision["decision_text"] = f"Start deadline work now and skip {event_name}."
+        decision["decision_text"] = f"Start deadline work and skip {event_name}."
 
     action = decision.get("action", "")
     decision_text = str(decision.get("decision_text", "")).strip()
@@ -457,7 +457,7 @@ def _enforce_real_world_wording(
         decision_text = _build_concrete_decision_text(action, event_name, task_name, conflicting_item)
 
     if not decision_text.lower().startswith(ALLOWED_ACTIONS):
-        decision_text = f"Start {task_name} now."
+        decision_text = f"Start {task_name}."
 
     aligned = _build_aligned_sections(decision_text, raw_text)
     decision["decision_text"] = decision_text

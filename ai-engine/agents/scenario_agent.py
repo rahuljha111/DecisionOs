@@ -143,7 +143,7 @@ async def run_scenario_agent(
     # MUST have alternatives
     if not alternatives or len(alternatives) < 3 or all(a in generic_alternatives for a in alternatives[:3]):
         # Generate contextual alternatives based on task and event priority
-        event_type = calendar_result.get("event_type", "event")
+        event_type = (calendar_result.get("event_type") or "event")
         alternatives = _build_contextual_alternatives(event_type)
         alternative_details = {a: {"action": a} for a in alternatives}
     
@@ -266,7 +266,7 @@ def _generate_scenarios_rule_based(
     Generate scenarios using rule-based logic when LLM fails.
     """
     task_type = extracted_data.get("task_type", "task")
-    event_type = calendar_result.get("event_type", "event")
+    event_type = calendar_result.get("event_type") or "event"
     urgency = task_analysis.get("urgency_score", 5)
     has_conflict = calendar_result.get("has_conflict", False)
     
@@ -319,7 +319,7 @@ def _generate_scenarios_rule_based(
             scenario = {
                 "action": action,
                 "description": f"Reschedule {event_type} to after deadline",
-                "task_impact": f"Can focus on {task_type} now, {event_type} later",
+                "task_impact": f"Can focus on {task_type} first, {event_type} later",
                 "consequences": "Balanced solution if rescheduling is possible",
                 "risks": [f"May not be able to reschedule {event_type}", "Adds planning overhead"],
                 "benefits": ["Keeps both commitments", "Reduces conflict", "Flexible approach"]
