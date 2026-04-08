@@ -7,14 +7,17 @@ from fastapi.responses import StreamingResponse, RedirectResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 from typing import List, Optional
+from collections import Counter
 from datetime import datetime, timedelta
-import re
+import os
 import json
 from pydantic import BaseModel, Field
+from openai import AsyncOpenAI
 
 from backend.db.database import get_db, Decision, CalendarEvent, Task, get_or_create_user, User, GoogleCalendarToken
 from backend.schemas import DecisionRequest, EventCreate, TaskCreate, ExecuteActionRequest
 from ai_engine.orchestrator import stream_decision
+from ai_engine.utils.helpers import safe_json
 from backend.tools.google_calendar import (
     get_google_calendar_service,
     is_google_calendar_available,
@@ -22,6 +25,32 @@ from backend.tools.google_calendar import (
 )
 
 router = APIRouter()
+
+gemini_client = AsyncOpenAI(
+        api_key=os.environ.get("GEMINI_API_KEY", ""),
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+)
+
+GEMINI_MODEL = "gemini-2.0-flash"
+PRIORITIZE_TEMPERATURE = 0.2
+
+PRIORITIZE_TASKS_SYSTEM_PROMPT = """You are a task prioritization planner.
+
+Return JSON only in this exact format:
+{
+    "prioritized_tasks": ["task 1", "task 2"],
+    "decision": "Do <task> first, then <task>.",
+    "reason": "Short explanation based on urgency, deadlines, and impact."
+}
+
+Rules:
+1. Use all input tasks exactly once in prioritized_tasks.
+2. Keep task text exactly as input text.
+3. Order tasks from highest to lowest priority.
+4. decision must explicitly mention first and second tasks when possible.
+5. reason must be concise and concrete.
+6. Do not add markdown or any text outside JSON.
+"""
 
 
 class PrioritizeRequest(BaseModel):
@@ -53,82 +82,95 @@ def _parse_datetime(value):
     return None
 
 
-def _score_task_priority(task: str) -> tuple[int, str, str]:
-    """Score a task string and return priority score, decision label, and reason."""
-    text = (task or "").lower().strip()
+def _normalize_prioritized_tasks(input_tasks: List[str], model_tasks: List[str]) -> List[str]:
+    """Keep model order while ensuring the list contains each input task exactly once."""
+    normalized_input = [task.strip() for task in input_tasks if isinstance(task, str) and task.strip()]
+    normalized_model = [str(task).strip() for task in model_tasks if str(task).strip()]
 
-    if not text:
-        return 0, "Ignore empty task", "Empty tasks are not actionable"
+    input_counts = Counter(task.lower() for task in normalized_input)
+    remaining_counts = input_counts.copy()
 
-    high_priority_keywords = ["interview", "exam", "deadline", "submission", "presentation", "meeting"]
-    medium_priority_keywords = ["prepare", "report", "project", "assignment", "dinner", "dine", "cook"]
-    low_priority_keywords = ["gym", "workout", "netflix", "watch", "movie", "game", "gaming", "scroll", "social"]
+    input_by_key = {}
+    for task in normalized_input:
+        input_by_key.setdefault(task.lower(), []).append(task)
 
-    if any(keyword in text for keyword in high_priority_keywords):
-        if "interview" in text:
-            return 100, "Attend interview", "Interview has highest priority and fixed time constraint"
-        if "exam" in text:
-            return 98, "Attend exam", "Exam has highest priority and fixed time constraint"
-        if "deadline" in text or "submission" in text:
-            return 95, "Finish deadline task", "Deadline-driven work takes priority over flexible items"
-        return 90, "Handle high priority task", "High-priority work should be completed before flexible tasks"
+    use_index = Counter()
+    ordered: List[str] = []
 
-    if any(keyword in text for keyword in medium_priority_keywords):
-        if "dinner" in text or "cook" in text:
-            return 70, "Prepare dinner", "Dinner is useful and time-sensitive, but still flexible"
-        return 75, "Work on task", "This task is productive and should be completed before low-value activities"
+    for task in normalized_model:
+        key = task.lower()
+        if remaining_counts.get(key, 0) <= 0:
+            continue
+        original_task = input_by_key[key][use_index[key]]
+        ordered.append(original_task)
+        use_index[key] += 1
+        remaining_counts[key] -= 1
 
-    if any(keyword in text for keyword in low_priority_keywords):
-        if "gym" in text or "workout" in text:
-            return 40, "Go to gym", "Gym is healthy but usually flexible compared with fixed commitments"
-        if "netflix" in text or "watch" in text or "movie" in text:
-            return 10, "Watch entertainment", "Entertainment is lowest priority after essential tasks"
-        return 20, "Do flexible activity", "Flexible activities should be placed after important work"
+    for task in normalized_input:
+        key = task.lower()
+        if remaining_counts.get(key, 0) <= 0:
+            continue
+        ordered.append(task)
+        remaining_counts[key] -= 1
 
-    return 60, "Work on task", "Default priority favors completing useful tasks before leisure"
-
-
-def _task_label(task: str) -> str:
-    """Convert a task sentence into a short label for decision text."""
-    text = (task or "").strip()
-    lower = text.lower()
-
-    if "interview" in lower:
-        return "interview"
-    if "exam" in lower:
-        return "exam"
-    if "deadline" in lower or "submission" in lower:
-        return "deadline task"
-    if "gym" in lower or "workout" in lower:
-        return "gym"
-    if "netflix" in lower:
-        return "Netflix"
-    if "dinner" in lower or "cook" in lower:
-        return "dinner"
-    if "report" in lower:
-        return "report"
-    if "project" in lower:
-        return "project"
-    if "assignment" in lower:
-        return "assignment"
-    if "meeting" in lower:
-        return "meeting"
-
-    cleaned = re.sub(r"\bat\s+\d{1,2}(:\d{2})?\s*(am|pm)\b", "", text, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\b(today|tomorrow|tonight|later)\b", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
-    if not cleaned:
-        return "task"
-    return cleaned.lower()
+    return ordered
 
 
-def _has_explicit_time(task: str) -> bool:
-    """Check whether a task contains a concrete time or day marker."""
-    lower = (task or "").lower()
-    return bool(
-        re.search(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", lower)
-        or any(marker in lower for marker in ["today", "tomorrow", "tonight", "this evening", "this morning", "this afternoon"])
-    )
+async def _prioritize_tasks_with_gemini(tasks: List[str]) -> dict:
+    """Use Gemini to prioritize tasks and return normalized API output."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured")
+
+    try:
+        completion = await gemini_client.chat.completions.create(
+            model=GEMINI_MODEL,
+            temperature=PRIORITIZE_TEMPERATURE,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": PRIORITIZE_TASKS_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps({"tasks": tasks})},
+            ],
+        )
+    except Exception as exc:
+        message = str(exc)
+        if "429" in message or "RESOURCE_EXHAUSTED" in message or "quota" in message.lower():
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini quota exceeded. Please retry later or update API billing/quota settings."
+            ) from exc
+        raise HTTPException(status_code=502, detail="Gemini request failed") from exc
+
+    raw = (completion.choices[0].message.content or "") if completion.choices else ""
+    parsed = safe_json(raw)
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=502, detail="Gemini returned invalid JSON")
+
+    model_prioritized = parsed.get("prioritized_tasks", [])
+    if not isinstance(model_prioritized, list):
+        raise HTTPException(status_code=502, detail="Gemini response missing prioritized_tasks list")
+
+    prioritized_tasks = _normalize_prioritized_tasks(tasks, model_prioritized)
+    if not prioritized_tasks:
+        raise HTTPException(status_code=502, detail="Gemini response produced empty prioritized task list")
+
+    decision = (parsed.get("decision") or "").strip()
+    reason = (parsed.get("reason") or "").strip()
+
+    if not decision:
+        if len(prioritized_tasks) > 1:
+            decision = f"Do {prioritized_tasks[0]} first, then {prioritized_tasks[1]}."
+        else:
+            decision = f"Do {prioritized_tasks[0]} first."
+
+    if not reason:
+        reason = "This order balances urgency, deadlines, and overall impact."
+
+    return {
+        "prioritized_tasks": prioritized_tasks,
+        "decision": decision,
+        "reason": reason,
+    }
 
 
 @router.post("/decide")
@@ -626,53 +668,12 @@ async def prioritize_day(
 
 @router.post("/prioritize_tasks")
 async def prioritize_tasks_only(request: TaskPrioritizeRequest):
-    """Prioritize a plain list of tasks for Postman demos."""
-    scored_tasks = []
+    """Prioritize a plain list of tasks with Gemini and return simple JSON output."""
+    tasks = [task.strip() for task in request.tasks if isinstance(task, str) and task.strip()]
+    if not tasks:
+        raise HTTPException(status_code=400, detail="tasks must contain at least one non-empty task")
 
-    for task in request.tasks:
-        score, decision_label, reason = _score_task_priority(task)
-        scored_tasks.append({
-            "task": task,
-            "score": score,
-            "decision_label": decision_label,
-            "reason": reason,
-        })
-
-    scored_tasks.sort(key=lambda item: item["score"], reverse=True)
-    prioritized_tasks = [item["task"] for item in scored_tasks]
-
-    decision = "No tasks provided"
-    reason = "No tasks provided"
-
-    if scored_tasks:
-        top_task = scored_tasks[0]["task"]
-        top_label = _task_label(top_task)
-        top_score = scored_tasks[0]["score"]
-        _, decision_label, reason = _score_task_priority(top_task)
-
-        skip_candidate = None
-        if len(scored_tasks) > 1:
-            time_bound_candidates = [item for item in scored_tasks[1:] if _has_explicit_time(item["task"])]
-            if time_bound_candidates:
-                skip_candidate = time_bound_candidates[-1]
-            else:
-                skip_candidate = scored_tasks[-1]
-
-        if top_score >= 90 and skip_candidate:
-            skip_label = _task_label(skip_candidate["task"])
-            decision = f"Attend {top_label} and skip {skip_label}"
-        elif top_score >= 70:
-            decision = f"Complete {top_label} first"
-        else:
-            decision = f"Work on {top_label} first"
-
-        reason = reason if reason else f"{top_label} has the highest priority"
-
-    return {
-        "prioritized_tasks": prioritized_tasks,
-        "decision": decision,
-        "reason": reason,
-    }
+    return await _prioritize_tasks_with_gemini(tasks)
 
 
 # ============================================================
