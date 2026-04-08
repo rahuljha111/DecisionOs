@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Google API imports
 try:
     from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import Flow
     from google_auth_oauthlib.flow import InstalledAppFlow
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
@@ -79,6 +80,13 @@ def _load_client_config() -> Optional[Dict[str, Any]]:
             logger.exception("Failed to load credentials.json")
 
     return None
+
+
+def _build_oauth_flow(client_config: Dict[str, Any], redirect_uri: str):
+    """Build OAuth flow for either Web or Installed client config."""
+    if "web" in client_config:
+        return Flow.from_client_config(client_config, SCOPES, redirect_uri=redirect_uri)
+    return InstalledAppFlow.from_client_config(client_config, SCOPES, redirect_uri=redirect_uri)
 
 
 class GoogleCalendarService:
@@ -228,7 +236,7 @@ class GoogleCalendarService:
             return None
 
         try:
-            flow = InstalledAppFlow.from_client_config(client_config, SCOPES, redirect_uri=redirect_uri)
+            flow = _build_oauth_flow(client_config, redirect_uri)
             state_key = user_id
             if db is not None:
                 state_key = uuid.uuid4().hex
@@ -262,7 +270,7 @@ class GoogleCalendarService:
             return False
 
         try:
-            flow = InstalledAppFlow.from_client_config(client_config, SCOPES, redirect_uri=redirect_uri)
+            flow = _build_oauth_flow(client_config, redirect_uri)
             verifier = None
             actual_user_id = user_id
             if db is not None:
