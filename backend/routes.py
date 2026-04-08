@@ -11,6 +11,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 import os
 import json
+import subprocess
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 from pydantic import BaseModel, Field
@@ -57,6 +58,7 @@ Rules:
 4. decision must explicitly mention first and second tasks when possible.
 5. reason must be concise and concrete.
 6. Do not add markdown or any text outside JSON.
+7. Avoid generic statements. Mention concrete constraints like time windows, deadlines, and calendar conflicts if provided.
 """
 
 
@@ -69,6 +71,7 @@ class PrioritizeRequest(BaseModel):
 
 class TaskPrioritizeRequest(BaseModel):
     """Request schema for simple task prioritization demos."""
+    user_id: str = "system"
     tasks: List[str] = Field(default_factory=list)
 
 
@@ -121,6 +124,116 @@ def _normalize_prioritized_tasks(input_tasks: List[str], model_tasks: List[str])
         remaining_counts[key] -= 1
 
     return ordered
+
+
+def _resolve_vertex_project() -> Optional[str]:
+    """Resolve Vertex project from env, ADC, metadata, or gcloud config."""
+    project = os.environ.get("VERTEX_AI_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT") or VERTEX_PROJECT
+    if project:
+        return project
+
+    try:
+        _, inferred_project = google.auth.default()
+        if inferred_project:
+            return inferred_project
+    except Exception:
+        pass
+
+    # Cloud Run metadata server fallback
+    try:
+        meta_req = urllib_request.Request(
+            url="http://metadata.google.internal/computeMetadata/v1/project/project-id",
+            headers={"Metadata-Flavor": "Google"},
+            method="GET",
+        )
+        with urllib_request.urlopen(meta_req, timeout=2) as resp:
+            meta_project = resp.read().decode("utf-8").strip()
+            if meta_project:
+                return meta_project
+    except Exception:
+        pass
+
+    # Local developer fallback
+    try:
+        output = subprocess.check_output(
+            ["gcloud", "config", "get-value", "project"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        ).strip()
+        if output and output != "(unset)":
+            return output
+    except Exception:
+        pass
+
+    return None
+
+
+def _resolve_vertex_bearer_token() -> str:
+    """Resolve a bearer token for Vertex requests (ADC first, gcloud fallback)."""
+    try:
+        credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        credentials.refresh(GoogleAuthRequest())
+        if credentials.token:
+            return credentials.token
+    except Exception:
+        pass
+
+    # Local developer fallback: use logged-in gcloud user token.
+    gcloud_candidates = [
+        "gcloud",
+        "gcloud.cmd",
+        r"C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd",
+        r"C:\Program Files\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd",
+    ]
+    for gcloud_bin in gcloud_candidates:
+        try:
+            token = subprocess.check_output(
+                [gcloud_bin, "auth", "print-access-token"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=10,
+            ).strip()
+            if token:
+                return token
+        except Exception:
+            continue
+
+    raise HTTPException(
+        status_code=503,
+        detail="Vertex AI authentication failed. Configure ADC or login with gcloud auth login."
+    )
+
+
+def _get_upcoming_calendar_context(db: Session, user_id: str, horizon_hours: int = 24) -> List[dict]:
+    """Return upcoming events for model context in a compact structure."""
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        return []
+
+    now = datetime.now()
+    horizon = now + timedelta(hours=horizon_hours)
+    events = (
+        db.query(CalendarEvent)
+        .filter(
+            CalendarEvent.user_id == user.id,
+            CalendarEvent.status != "cancelled",
+            CalendarEvent.end_time >= now,
+            CalendarEvent.start_time <= horizon,
+        )
+        .order_by(CalendarEvent.start_time.asc())
+        .limit(10)
+        .all()
+    )
+
+    return [
+        {
+            "title": event.title,
+            "start": event.start_time.isoformat(),
+            "end": event.end_time.isoformat(),
+        }
+        for event in events
+    ]
 
 
 async def _prioritize_tasks_with_gemini(tasks: List[str]) -> dict:
@@ -209,26 +322,16 @@ def _build_prioritize_response(tasks: List[str], parsed: dict) -> dict:
     }
 
 
-async def _prioritize_tasks_with_vertex(tasks: List[str]) -> dict:
+async def _prioritize_tasks_with_vertex(tasks: List[str], calendar_events: List[dict]) -> dict:
     """Use Vertex AI Gemini (ADC auth) for task prioritization."""
-    project = os.environ.get("VERTEX_AI_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT") or VERTEX_PROJECT
+    project = _resolve_vertex_project()
     location = os.environ.get("VERTEX_AI_LOCATION") or VERTEX_LOCATION
     model = os.environ.get("VERTEX_AI_MODEL") or VERTEX_MODEL
 
     if not project:
-        try:
-            _, inferred_project = google.auth.default()
-            project = inferred_project
-        except Exception:
-            project = None
-    if not project:
-        raise HTTPException(status_code=503, detail="Vertex AI project is not configured")
+        raise HTTPException(status_code=503, detail="Vertex AI project is not configured. Set VERTEX_AI_PROJECT or gcloud default project.")
 
-    try:
-        credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        credentials.refresh(GoogleAuthRequest())
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Vertex AI authentication failed") from exc
+    token = _resolve_vertex_bearer_token()
 
     url = (
         f"https://{location}-aiplatform.googleapis.com/v1/"
@@ -241,7 +344,14 @@ async def _prioritize_tasks_with_vertex(tasks: List[str]) -> dict:
         "temperature": PRIORITIZE_TEMPERATURE,
         "messages": [
             {"role": "system", "content": PRIORITIZE_TASKS_SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps({"tasks": tasks})},
+            {
+                "role": "user",
+                "content": json.dumps({
+                    "tasks": tasks,
+                    "calendar_events": calendar_events,
+                    "instruction": "Prioritize tasks while considering calendar conflicts and fixed-time meetings."
+                }),
+            },
         ],
     }
 
@@ -249,7 +359,7 @@ async def _prioritize_tasks_with_vertex(tasks: List[str]) -> dict:
         url=url,
         data=json.dumps(payload).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {credentials.token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
         method="POST",
@@ -782,13 +892,20 @@ async def prioritize_day(
 
 
 @router.post("/prioritize_tasks")
-async def prioritize_tasks_only(request: TaskPrioritizeRequest):
+async def prioritize_tasks_only(
+    request: TaskPrioritizeRequest,
+    db: Session = Depends(get_db)
+):
     """Prioritize a plain list of tasks using Vertex AI Gemini and return simple JSON output."""
+    # NOTE: keep endpoint simple for Postman demos while still leveraging user calendar context.
     tasks = [task.strip() for task in request.tasks if isinstance(task, str) and task.strip()]
     if not tasks:
         raise HTTPException(status_code=400, detail="tasks must contain at least one non-empty task")
 
-    return await _prioritize_tasks_with_vertex(tasks)
+    # Pull upcoming events to avoid generic prioritization and include real constraints.
+    calendar_events = _get_upcoming_calendar_context(db, request.user_id)
+
+    return await _prioritize_tasks_with_vertex(tasks, calendar_events)
 
 
 # ============================================================

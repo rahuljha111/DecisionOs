@@ -18,7 +18,7 @@ client = AsyncOpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
-MODEL = "gemini-2.0-flash"
+MODEL = "gemini-1.5-flash"
 TEMPERATURE = 0.2
 MAX_RETRIES = 2
 USE_LLM_PLANNER = os.getenv("DECISIONOS_USE_LLM_PLANNER", "false").lower() in {"1", "true", "yes"}
