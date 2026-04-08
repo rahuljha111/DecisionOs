@@ -472,10 +472,24 @@ async function submitDecision() {
   // Get pending tasks from to-do list
   const pendingTasks = todoItems.filter((t) => !t.done).map((t) => t.text);
 
+  // Inject calendar commitments as candidate tasks so final ranking can pick them.
+  const calendarCandidates = (todayMeetings || [])
+    .filter((m) => (m.title || "").trim())
+    .slice(0, 5)
+    .map((m) => {
+      const title = (m.title || "Calendar event").trim();
+      const time = (m.time || "").trim();
+      return time
+        ? `Attend ${title} at ${time}`
+        : `Attend ${title}`;
+    });
+
+  const prioritizationTasks = [...new Set([...pendingTasks, ...calendarCandidates])];
+
   console.log("pendingTasks", pendingTasks);
 
   // Check if there are any tasks
-  if (pendingTasks.length === 0) {
+  if (prioritizationTasks.length === 0) {
     showToast("Please create To Do list", "warning");
     return;
   }
@@ -496,7 +510,7 @@ async function submitDecision() {
       message: "Classifying tasks and building workflow context...",
     });
     await delay(180);
-    const plannerData = buildPlannerSummary(pendingTasks, todayMeetings);
+    const plannerData = buildPlannerSummary(prioritizationTasks, todayMeetings);
     updateTraceItem("planner", "complete", plannerData);
 
     addTraceItem(traceContainer, {
@@ -506,7 +520,7 @@ async function submitDecision() {
       message: "Scoring urgency and impact across pending tasks...",
     });
     await delay(180);
-    const taskData = buildTaskSummary(pendingTasks, todayMeetings);
+    const taskData = buildTaskSummary(prioritizationTasks, todayMeetings);
     updateTraceItem("task", "complete", taskData);
 
     addTraceItem(traceContainer, {
@@ -541,7 +555,7 @@ async function submitDecision() {
       message: "Simulating execution paths from task + calendar state...",
     });
     await delay(180);
-    const scenarioData = buildScenarioOptions(pendingTasks, calendarEvents, taskData.priority);
+    const scenarioData = buildScenarioOptions(prioritizationTasks, calendarEvents, taskData.priority);
     updateTraceItem("scenario", "complete", scenarioData);
     displayScenarios(scenarioData);
 
@@ -555,7 +569,7 @@ async function submitDecision() {
     const response = await fetch(`${API_BASE}/prioritize_tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, tasks: pendingTasks }),
+      body: JSON.stringify({ user_id: userId, tasks: prioritizationTasks }),
     });
 
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -563,7 +577,7 @@ async function submitDecision() {
     const data = await response.json();
     const prioritized = Array.isArray(data.prioritized_tasks)
       ? data.prioritized_tasks
-      : pendingTasks;
+      : prioritizationTasks;
 
     updateProcessingItem("vertex_ai", "complete");
     addTraceItem(traceContainer, {
@@ -573,7 +587,7 @@ async function submitDecision() {
       message: "Vertex AI selected final action from simulated context.",
     });
 
-    const chosen = prioritized[0] || pendingTasks[0] || "Top task";
+    const chosen = prioritized[0] || prioritizationTasks[0] || "Top task";
     const rejected = prioritized.slice(1).map((task, idx) => `${task}: deferred (rank ${idx + 2})`);
     const topScenarioScore = Math.max(...(scenarioData.options || []).map((o) => Number(o.score) || 0), 70);
     const decisionPayload = {
