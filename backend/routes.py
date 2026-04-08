@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 from typing import List, Optional
 from datetime import datetime, timedelta
+import re
 import json
 from pydantic import BaseModel, Field
 
@@ -30,6 +31,11 @@ class PrioritizeRequest(BaseModel):
     meetings: List[dict] = Field(default_factory=list)
 
 
+class TaskPrioritizeRequest(BaseModel):
+    """Request schema for simple task prioritization demos."""
+    tasks: List[str] = Field(default_factory=list)
+
+
 def _parse_datetime(value):
     """Parse datetime from ISO strings while accepting datetime values directly."""
     if value is None:
@@ -45,6 +51,84 @@ def _parse_datetime(value):
         except ValueError:
             return None
     return None
+
+
+def _score_task_priority(task: str) -> tuple[int, str, str]:
+    """Score a task string and return priority score, decision label, and reason."""
+    text = (task or "").lower().strip()
+
+    if not text:
+        return 0, "Ignore empty task", "Empty tasks are not actionable"
+
+    high_priority_keywords = ["interview", "exam", "deadline", "submission", "presentation", "meeting"]
+    medium_priority_keywords = ["prepare", "report", "project", "assignment", "dinner", "dine", "cook"]
+    low_priority_keywords = ["gym", "workout", "netflix", "watch", "movie", "game", "gaming", "scroll", "social"]
+
+    if any(keyword in text for keyword in high_priority_keywords):
+        if "interview" in text:
+            return 100, "Attend interview", "Interview has highest priority and fixed time constraint"
+        if "exam" in text:
+            return 98, "Attend exam", "Exam has highest priority and fixed time constraint"
+        if "deadline" in text or "submission" in text:
+            return 95, "Finish deadline task", "Deadline-driven work takes priority over flexible items"
+        return 90, "Handle high priority task", "High-priority work should be completed before flexible tasks"
+
+    if any(keyword in text for keyword in medium_priority_keywords):
+        if "dinner" in text or "cook" in text:
+            return 70, "Prepare dinner", "Dinner is useful and time-sensitive, but still flexible"
+        return 75, "Work on task", "This task is productive and should be completed before low-value activities"
+
+    if any(keyword in text for keyword in low_priority_keywords):
+        if "gym" in text or "workout" in text:
+            return 40, "Go to gym", "Gym is healthy but usually flexible compared with fixed commitments"
+        if "netflix" in text or "watch" in text or "movie" in text:
+            return 10, "Watch entertainment", "Entertainment is lowest priority after essential tasks"
+        return 20, "Do flexible activity", "Flexible activities should be placed after important work"
+
+    return 60, "Work on task", "Default priority favors completing useful tasks before leisure"
+
+
+def _task_label(task: str) -> str:
+    """Convert a task sentence into a short label for decision text."""
+    text = (task or "").strip()
+    lower = text.lower()
+
+    if "interview" in lower:
+        return "interview"
+    if "exam" in lower:
+        return "exam"
+    if "deadline" in lower or "submission" in lower:
+        return "deadline task"
+    if "gym" in lower or "workout" in lower:
+        return "gym"
+    if "netflix" in lower:
+        return "Netflix"
+    if "dinner" in lower or "cook" in lower:
+        return "dinner"
+    if "report" in lower:
+        return "report"
+    if "project" in lower:
+        return "project"
+    if "assignment" in lower:
+        return "assignment"
+    if "meeting" in lower:
+        return "meeting"
+
+    cleaned = re.sub(r"\bat\s+\d{1,2}(:\d{2})?\s*(am|pm)\b", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(today|tomorrow|tonight|later)\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
+    if not cleaned:
+        return "task"
+    return cleaned.lower()
+
+
+def _has_explicit_time(task: str) -> bool:
+    """Check whether a task contains a concrete time or day marker."""
+    lower = (task or "").lower()
+    return bool(
+        re.search(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", lower)
+        or any(marker in lower for marker in ["today", "tomorrow", "tonight", "this evening", "this morning", "this afternoon"])
+    )
 
 
 @router.post("/decide")
@@ -537,6 +621,57 @@ async def prioritize_day(
         "plan": plan,
         "count": len(plan),
         "calendar_event_count": len(normalized_events),
+    }
+
+
+@router.post("/prioritize_tasks")
+async def prioritize_tasks_only(request: TaskPrioritizeRequest):
+    """Prioritize a plain list of tasks for Postman demos."""
+    scored_tasks = []
+
+    for task in request.tasks:
+        score, decision_label, reason = _score_task_priority(task)
+        scored_tasks.append({
+            "task": task,
+            "score": score,
+            "decision_label": decision_label,
+            "reason": reason,
+        })
+
+    scored_tasks.sort(key=lambda item: item["score"], reverse=True)
+    prioritized_tasks = [item["task"] for item in scored_tasks]
+
+    decision = "No tasks provided"
+    reason = "No tasks provided"
+
+    if scored_tasks:
+        top_task = scored_tasks[0]["task"]
+        top_label = _task_label(top_task)
+        top_score = scored_tasks[0]["score"]
+        _, decision_label, reason = _score_task_priority(top_task)
+
+        skip_candidate = None
+        if len(scored_tasks) > 1:
+            time_bound_candidates = [item for item in scored_tasks[1:] if _has_explicit_time(item["task"])]
+            if time_bound_candidates:
+                skip_candidate = time_bound_candidates[-1]
+            else:
+                skip_candidate = scored_tasks[-1]
+
+        if top_score >= 90 and skip_candidate:
+            skip_label = _task_label(skip_candidate["task"])
+            decision = f"Attend {top_label} and skip {skip_label}"
+        elif top_score >= 70:
+            decision = f"Complete {top_label} first"
+        else:
+            decision = f"Work on {top_label} first"
+
+        reason = reason if reason else f"{top_label} has the highest priority"
+
+    return {
+        "prioritized_tasks": prioritized_tasks,
+        "decision": decision,
+        "reason": reason,
     }
 
 

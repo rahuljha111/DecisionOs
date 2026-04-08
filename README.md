@@ -382,6 +382,7 @@ Next Steps:
 | GET | `/api/calendar/events` | Get calendar events |
 | GET | `/api/calendar/status` | Check calendar integration |
 | GET | `/api/health` | Health check |
+| POST | `/api/prioritize_tasks` | Prioritize a plain list of tasks |
 
 ### Decision Request
 
@@ -402,6 +403,37 @@ POST /api/execute_action
     "action_type": "cancel_event",
     "event_id": "abc123",
     "params": {}
+}
+```
+
+### Task Prioritization Demo
+
+Use this endpoint when you want a simple Postman request that accepts only an array of tasks and returns a prioritized list plus a short decision explanation.
+
+```json
+POST /api/prioritize_tasks
+{
+    "tasks": [
+        "Go to gym at 6 PM",
+        "Attend interview at 7 PM",
+        "Watch Netflix",
+        "Prepare dinner"
+    ]
+}
+```
+
+Example response:
+
+```json
+{
+    "prioritized_tasks": [
+        "Attend interview at 7 PM",
+        "Prepare dinner",
+        "Go to gym at 6 PM",
+        "Watch Netflix"
+    ],
+    "decision": "Attend interview and skip gym",
+    "reason": "Interview has highest priority and fixed time constraint"
 }
 ```
 
