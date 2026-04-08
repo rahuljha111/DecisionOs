@@ -642,12 +642,67 @@ function summarizeData(agent, data) {
     case "calendar":
       return data.has_conflict ? "⚠️ Conflict detected" : "✓ No conflicts";
     case "scenario":
-      return `${data.options?.length || 0} options simulated`;
+      return formatScenarioSummary(data.options || []);
     case "decision_engine":
       return "Decision made";
     default:
       return "";
   }
+}
+
+function formatScenarioScore(option) {
+  const score = Number(option?.score);
+  return Number.isFinite(score) ? Math.round(score) : 0;
+}
+
+function formatScenarioSummary(options) {
+  if (!options.length) return "0 options simulated";
+
+  const scoreSummary = options
+    .slice(0, 3)
+    .map((opt) => `${formatOptionName(opt.action)} ${formatScenarioScore(opt)}/100`)
+    .join(" · ");
+
+  return `${options.length} options simulated (${scoreSummary})`;
+}
+
+function formatScenarioRationale(opt) {
+  const score = formatScenarioScore(opt);
+  const urgency = Number(opt?.urgency_factor ?? 0);
+  const taskPriority = String(opt?.task_priority || "unknown").toLowerCase();
+  const eventPriority = String(opt?.event_priority || "unknown").toLowerCase();
+
+  if (taskPriority === "high" && eventPriority === "low") {
+    if (String(opt?.action || "").includes("skip")) {
+      return `High-priority task beats the low-priority event, so this gets a strong score (${score}/100).`;
+    }
+    if (String(opt?.action || "").includes("attend")) {
+      return `This keeps the low-priority event, so it is penalized against the high-priority task (${score}/100).`;
+    }
+  }
+
+  if (taskPriority === "low" && eventPriority === "high") {
+    if (String(opt?.action || "").includes("attend")) {
+      return `The higher-priority event should win here, so this choice is favored (${score}/100).`;
+    }
+    if (String(opt?.action || "").includes("skip")) {
+      return `Skipping a high-priority event is discouraged, so this score stays low (${score}/100).`;
+    }
+  }
+
+  if (urgency >= 7 && String(opt?.action || "").includes("skip")) {
+    return `Urgency is high, so skipping gets rewarded as a focus-first move (${score}/100).`;
+  }
+
+  if (urgency >= 7 && String(opt?.action || "").includes("attend")) {
+    return `High urgency makes attending less attractive, so the score is reduced (${score}/100).`;
+  }
+
+  if (String(opt?.action || "").includes("reschedule")) {
+    return `Rescheduling is the compromise option, so it lands in the middle (${score}/100).`;
+  }
+
+  return `Score ${score}/100 based on urgency ${urgency}/10 and the current conflict context.`;
 }
 
 function formatOptionName(action) {
@@ -664,8 +719,32 @@ function displayScenarios(data) {
   const sorted = [...data.options].sort(
     (a, b) => (b.score || 0) - (a.score || 0),
   );
+  const scoreSummary = sorted
+    .slice(0, 3)
+    .map((opt) => `${formatOptionName(opt.action)}: ${formatScenarioScore(opt)}/100`)
+    .join(" · ");
 
-  let html = '<div class="scenarios-grid">';
+  let html = "";
+
+  if (scoreSummary) {
+    html += `
+        <div class="scenario-score-summary">
+            <strong>Scores:</strong> ${scoreSummary}
+        </div>
+    `;
+  }
+
+  if (data.recommendation) {
+    const recommendedOption = sorted.find((opt) => opt.action === data.recommendation);
+    html += `
+        <div class="scenario-recommendation">
+            <strong>Scenario recommendation:</strong> ${formatOptionName(data.recommendation)}
+            ${recommendedOption?.description ? `<div class="scenario-recommendation-note">${escapeHtml(recommendedOption.description)}</div>` : ""}
+        </div>
+    `;
+  }
+
+  html += '<div class="scenarios-grid">';
 
   sorted.forEach((opt, index) => {
     const isRecommended = index === 0;
@@ -680,6 +759,9 @@ function displayScenarios(data) {
                     <span class="score-value">${Math.round(opt.score)}</span>
                     <span class="score-label">/ 100</span>
                 </div>
+                <p class="scenario-rationale">
+                  <strong>Why this score:</strong> ${formatScenarioRationale(opt)}
+                </p>
                 <p class="scenario-outcome">
                     <strong>Outcome:</strong> ${opt.description || "No description"}
                 </p>

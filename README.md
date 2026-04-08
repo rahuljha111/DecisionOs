@@ -53,6 +53,7 @@ DecisionOS is a **multi-agent AI system** that helps you make better decisions b
 
 - **🧠 Multi-Agent Orchestration** - 5 specialized agents working together
 - **🎲 Scenario Simulation** - Evaluates multiple options with scores
+- **🧾 Scenario Recommendation Trace** - Shows all three scenario scores plus the recommendation and why it won
 - **📅 Google Calendar Integration** - Real calendar data for conflict detection
 - **⚡ Actionable Decisions** - Execute actions directly (cancel, reschedule events)
 - **🔄 Real-time Streaming** - SSE-based live agent trace

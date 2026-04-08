@@ -108,23 +108,43 @@ async def run_scenario_agent(
         else:
             alternatives.append(alt)
             alternative_details[alt] = {"action": alt}
+
+    generic_alternatives = {
+        "proceed_as_planned",
+        "start_immediately",
+        "schedule_buffer",
+    }
+
+    def _build_contextual_alternatives(event_type: str) -> List[str]:
+        task_type = (extracted_data.get("task_type") or "task").strip() or "task"
+        task_priority = task_analysis.get("task_priority", "medium")
+        event_priority = calendar_result.get("event_priority", "medium")
+
+        if is_non_negotiable_event(task_type) or task_priority == "high":
+            return [
+                f"skip_{event_type}",
+                f"reschedule_{event_type}",
+                f"attend_{event_type}",
+            ]
+
+        if event_priority == "high":
+            return [
+                f"attend_{event_type}",
+                f"reschedule_{event_type}",
+                f"skip_{event_type}",
+            ]
+
+        return [
+            f"skip_{event_type}",
+            f"reschedule_{event_type}",
+            f"attend_{event_type}",
+        ]
     
     # MUST have alternatives
-    if not alternatives or len(alternatives) < 3:
-        # Generate default alternatives based on event type
+    if not alternatives or len(alternatives) < 3 or all(a in generic_alternatives for a in alternatives[:3]):
+        # Generate contextual alternatives based on task and event priority
         event_type = calendar_result.get("event_type", "event")
-        if is_non_negotiable_event(event_type):
-            alternatives = [
-                f"attend_{event_type}",
-                f"skip_{event_type}",
-                "focus_on_task"
-            ]
-        else:
-            alternatives = [
-                f"attend_{event_type}",
-                f"skip_{event_type}",
-                f"reschedule_{event_type}"
-            ]
+        alternatives = _build_contextual_alternatives(event_type)
         alternative_details = {a: {"action": a} for a in alternatives}
     
     # Take exactly 3 alternatives
@@ -377,9 +397,9 @@ def _score_scenarios_differentiated(
         # HARD PENALTY RULES (CRITICAL)
         # ============================================================
         
-        # RULE 1: High priority task + conflict + low priority event
-        # Example: exam + conflict + gym → MUST skip gym
-        if has_conflict and task_priority == "high" and event_priority == "low":
+        # RULE 1: High priority task + low priority event
+        # Example: exam + gym → MUST skip gym
+        if task_priority == "high" and event_priority == "low":
             if "skip" in action:
                 # FORCE high score for skipping low priority
                 score = max(85, base_score + 30)

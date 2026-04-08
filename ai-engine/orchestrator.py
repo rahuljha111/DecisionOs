@@ -228,8 +228,9 @@ async def stream_decision(
         # ============================================================
         has_conflict = calendar_result.get("has_conflict", False)
         urgency = task_analysis.get("urgency_score", 5)
+        importance = task_analysis.get("importance_score", 5)
         
-        if has_conflict or urgency >= URGENCY_THRESHOLD_FOR_SCENARIOS:
+        if has_conflict or urgency >= URGENCY_THRESHOLD_FOR_SCENARIOS or importance >= 8:
             # Complex situation - run scenario simulation
             yield format_sse_event("agent_start", {
                 "agent": "scenario",

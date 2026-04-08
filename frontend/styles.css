@@ -698,6 +698,37 @@ body {
     padding: 16px;
 }
 
+.scenario-score-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.08), rgba(16, 185, 129, 0.03));
+    color: var(--gray-700);
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+
+.scenario-recommendation {
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border: 1px solid var(--success-border);
+    border-radius: var(--radius-md);
+    background: var(--success-light);
+    color: var(--gray-800);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.scenario-recommendation-note {
+    margin-top: 4px;
+    color: var(--gray-600);
+}
+
 .scenarios-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -771,8 +802,19 @@ body {
     line-height: 1.5;
 }
 
+.scenario-rationale {
+    font-size: 12px;
+    color: var(--gray-600);
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
 .scenario-outcome strong,
 .scenario-risk strong {
+    color: var(--gray-700);
+}
+
+.scenario-rationale strong {
     color: var(--gray-700);
 }
 
