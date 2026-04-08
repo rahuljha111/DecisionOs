@@ -324,6 +324,9 @@ def _build_prioritize_response(tasks: List[str], parsed: dict) -> dict:
 
 async def _prioritize_tasks_with_vertex(tasks: List[str], calendar_events: List[dict]) -> dict:
     """Use Vertex AI Gemini (ADC auth) for task prioritization."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     project = _resolve_vertex_project()
     location = os.environ.get("VERTEX_AI_LOCATION") or VERTEX_LOCATION
     model = os.environ.get("VERTEX_AI_MODEL") or VERTEX_MODEL
@@ -332,6 +335,8 @@ async def _prioritize_tasks_with_vertex(tasks: List[str], calendar_events: List[
         raise HTTPException(status_code=503, detail="Vertex AI project is not configured. Set VERTEX_AI_PROJECT or gcloud default project.")
 
     token = _resolve_vertex_bearer_token()
+    
+    logger.info(f"Vertex Prioritize: project={project}, location={location}, model={model}, tasks={len(tasks)}, calendar_events={len(calendar_events)}")
 
     url = (
         f"https://{location}-aiplatform.googleapis.com/v1/"
@@ -369,9 +374,11 @@ async def _prioritize_tasks_with_vertex(tasks: List[str], calendar_events: List[
         with urllib_request.urlopen(req, timeout=45) as resp:
             response_body = resp.read().decode("utf-8")
             vertex_response = json.loads(response_body)
+            logger.info(f"Vertex response received: {vertex_response}")
     except HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else ""
         message = error_body or str(exc)
+        logger.error(f"Vertex HTTPError {exc.code}: {message}")
         if exc.code in (429, 503):
             raise HTTPException(status_code=503, detail="Vertex AI quota exceeded. Please retry later.") from exc
         if exc.code in (401, 403):
@@ -709,6 +716,28 @@ async def google_calendar_status(
     }
 
 
+def _build_callback_url(request: Request) -> str:
+    """Construct absolute callback URL, handling Cloud Run reverse proxy."""
+    # Cloud Run sets these headers for reverse proxy
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    
+    if forwarded_host and forwarded_proto:
+        return f"{forwarded_proto}://{forwarded_host}/api/calendar/oauth/callback"
+    
+    # Fallback to request.url_for if headers not available
+    try:
+        callback = str(request.url_for("google_calendar_oauth_callback"))
+        if callback.startswith("http"):
+            return callback
+        # If relative, build absolute with request base URL
+        base_url = str(request.base_url).rstrip("/")
+        return base_url + callback
+    except Exception:
+        # Last resort: use localhost for local dev
+        return "http://localhost:8000/api/calendar/oauth/callback"
+
+
 @router.get("/calendar/auth")
 async def google_calendar_authenticate(
     request: Request,
@@ -733,7 +762,7 @@ async def google_calendar_authenticate(
     
     try:
         service = get_google_calendar_service()
-        redirect_uri = str(request.url_for("google_calendar_oauth_callback"))
+        redirect_uri = _build_callback_url(request)
         auth_url = service.get_auth_url(redirect_uri, user_id=user_id, db=db)
         if not auth_url:
             raise HTTPException(status_code=400, detail=f"Failed to start OAuth: {service.error_message}")
@@ -757,7 +786,7 @@ async def google_calendar_oauth_callback(
         raise HTTPException(status_code=400, detail="Missing OAuth code")
 
     service = get_google_calendar_service()
-    redirect_uri = str(request.url_for("google_calendar_oauth_callback"))
+    redirect_uri = _build_callback_url(request)
     success = service.complete_web_oauth(code=code, redirect_uri=redirect_uri, user_id=state, db=db)
 
     if not success:

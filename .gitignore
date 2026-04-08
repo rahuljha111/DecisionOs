@@ -220,3 +220,5 @@ __pycache__/
 
 # OS
 .DS_Store
+env-vars.yaml
+env_vars.txt
